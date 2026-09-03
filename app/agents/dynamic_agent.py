@@ -97,12 +97,24 @@ class DynamicAgent(BaseAgent):
                 "messages": [AIMessage(content=f"[{self.name}] {primary_target} in blocco ({current_status}). In attesa.")],
             }
 
-        # 3. Controllo conflitti nel DB
-        reconciled_events = [e for e in recent_events if str(e.get("action", "")).startswith("RECONCILED_")]
-        recently_reconciled = any(e.get("target") == primary_target for e in reconciled_events)
-        unresolved_events = [e for e in recent_events if not str(e.get("action", "")).startswith("RECONCILED_")]
+        # 3. Trova l'evento più recente in ordine cronologico per questo target
+        target_events = [e for e in recent_events if e.get("target") == primary_target]
+        target_events.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
 
-        has_conflict, conflict_event = self.check_for_recent_conflict(primary_target, unresolved_events)
+        has_conflict = False
+        recently_reconciled = False
+        conflict_event = None
+
+        if target_events:
+            latest_ev = target_events[0]
+            latest_act = str(latest_ev.get("action", ""))
+            latest_actor = str(latest_ev.get("actor", ""))
+
+            if latest_act.startswith("RECONCILED_") or latest_act.startswith("RESOLVED_") or latest_act.startswith("UNBLOCKED"):
+                recently_reconciled = True
+            elif (latest_act in ["FORCE_SHUTDOWN", "SECURITY_LOCK"] or latest_act.startswith("REJECTED_")) and latest_actor != self.name:
+                has_conflict = True
+                conflict_event = latest_ev
 
         # 4. Prompting MAO
         user_prompt = self.user_prompt_template.format(
@@ -121,15 +133,15 @@ class DynamicAgent(BaseAgent):
         update: dict[str, Any] = {}
 
         # 5. Gestione decisione ed Escalation verso il Padre
-        if "DECISIONE: ESCALATE" in ai_response_str and has_conflict and not recently_reconciled:
+        if (has_conflict and not recently_reconciled) or ("DECISIONE: ESCALATE" in ai_response_str):
             reason = f"Conflitto/anomalia rilevata da {self.name}: {ai_response}"
             logger.warning(f"[{self.name}] Escalation inviata a '{self.parent_agent_name}' per {primary_target}")
 
             escalation = self.create_escalation(
                 target_device=primary_target,
-                proposed_action="DESIRED_ACTION",
+                proposed_action="TURN_ON",
                 reason=reason,
-                conflict_detected=has_conflict,
+                conflict_detected=True,
                 context_events=[conflict_event] if conflict_event else [],
             )
 
@@ -138,16 +150,16 @@ class DynamicAgent(BaseAgent):
                 action="ESCALATION_PROPOSED",
                 target=primary_target,
                 old_value=current_status,
-                new_value="ESCALATION_PENDING",
+                new_value="TURN_ON",
                 reasoning=reason,
                 escalated=True,
             )
 
             update["pending_escalations"] = [escalation]
             update["next_agent"] = self.parent_agent_name or "brain"
-            update["messages"] = [AIMessage(content=f"[{self.name}] Escalation inviata a {self.parent_agent_name} per {primary_target}.")]
+            update["messages"] = [AIMessage(content=f"[{self.name}] Conflitto rilevato. Escalation inviata a {self.parent_agent_name} per {primary_target}.")]
 
-        elif "DECISIONE: ACTION" in ai_response_str:
+        elif "DECISIONE: ACTION" in ai_response_str and not has_conflict:
             reasoning = f"Azione consigliata da AI in {self.name}: {ai_response_str}"
             applied = await self.apply_status(
                 target=primary_target,
@@ -157,8 +169,22 @@ class DynamicAgent(BaseAgent):
                 escalated=False,
                 tools_map=self.tools,
             )
-            update["messages"] = [AIMessage(content=f"[{self.name}] Azione eseguita su {primary_target} (applied={applied}).")]
-            update["next_agent"] = self.parent_agent_name or "END"
+            if applied:
+                update["messages"] = [AIMessage(content=f"[{self.name}] Azione eseguita su {primary_target} (applied=True).")]
+                update["next_agent"] = self.parent_agent_name or "END"
+            else:
+                # Azione bloccata per priorità: genera escalation verso il Padre
+                reason = f"Azione su {primary_target} bloccata da vincolo di priorità per {self.name}"
+                escalation = self.create_escalation(
+                    target_device=primary_target,
+                    proposed_action="TURN_ON",
+                    reason=reason,
+                    conflict_detected=True,
+                    context_events=[],
+                )
+                update["pending_escalations"] = [escalation]
+                update["next_agent"] = self.parent_agent_name or "brain"
+                update["messages"] = [AIMessage(content=f"[{self.name}] Azione su {primary_target} bloccata per priorità. Escalation inviata a {self.parent_agent_name}.")]
         else:
             logger.info(f"[{self.name}] Nessuna azione richiesta.")
             update["next_agent"] = self.parent_agent_name or "END"

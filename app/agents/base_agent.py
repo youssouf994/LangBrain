@@ -71,6 +71,33 @@ class BaseAgent(ABC):
         """
         pass
 
+    async def check_priority_lock(self, target: str) -> tuple[bool, str]:
+        """
+        Verifica se c'è un blocco attivo sul target impostato da un agente a priorità superiore (es. Sicurezza=500.0 vs Clima=1.0).
+        """
+        try:
+            events = await self.event_log.get_recent_events()
+            for event in events:
+                if event.get("target") == target:
+                    action = str(event.get("action", ""))
+                    new_val = str(event.get("new_value", "")).upper()
+                    actor = str(event.get("actor", ""))
+
+                    if action.startswith("EXPIRED_") or action.startswith("RESOLVED_") or action.startswith("UNBLOCKED") or action.startswith("RECONCILED_"):
+                        continue
+
+                    from app.core.constants import is_flag_expired, is_control_flag
+                    ts = str(event.get("timestamp", ""))
+                    if is_flag_expired(ts, ttl_minutes=self.conflict_window_minutes):
+                        continue
+
+                    if actor != self.name and (action in ["FORCE_SHUTDOWN", "SECURITY_LOCK"] or is_control_flag(new_val) or new_val == "OFF"):
+                        return False, f"Dispositivo '{target}' bloccato da '{actor}' con azione '{action}' ({new_val})"
+        except Exception as e:
+            logger.error(f"[{self.name}] Errore durante la verifica dei blocchi di priorità: {e}")
+
+        return True, ""
+
     async def apply_status(
         self, 
         target: str, 
@@ -82,8 +109,8 @@ class BaseAgent(ABC):
     ) -> bool:
         """
         Metodo unificato per azionare i tool reali e registrare la transizione old_value -> new_value su DB.
-        Include prevenzione delle esecuzioni ridondanti (cooldown/stabilizzazione).
-        Ritorna True se l'azione è stata effettivamente applicata, False se saltata perché ridondante.
+        Include prevenzione delle esecuzioni ridondanti e controllo dei blocchi a priorità superiore.
+        Ritorna True se l'azione è stata effettivamente applicata, False se saltata o respinta.
         """
         old_value = "UNKNOWN"
         tool_obj = tools_map.get(target) if tools_map else None
@@ -95,12 +122,31 @@ class BaseAgent(ABC):
             except Exception as e:
                 logger.error(f"[{self.name}] Errore lettura stato dal tool {target}: {e}")
 
-        # 2. Controllo Ridondanza: se il tool è GIÀ al valore desiderato, non rieseguire!
+        # 2. Controllo blocchi a priorità superiore nel DB
+        if self.name != "Brain" and not action.startswith("RECONCILED_") and not action.startswith("UNBLOCKED"):
+            allowed, block_msg = await self.check_priority_lock(target)
+            if not allowed:
+                logger.warning(f"[{self.name}] Azione RESPINTA su '{target}': {block_msg}")
+                try:
+                    await self.event_log.log_event(
+                        actor=self.name,
+                        action=f"REJECTED_{action}",
+                        target=target,
+                        old_value=old_value,
+                        new_value="REJECTED",
+                        reasoning=f"Azione respinta da vincolo di priorità superiore: {block_msg}",
+                        escalated=False,
+                    )
+                except Exception as e:
+                    logger.error(f"[{self.name}] Errore salvataggio REJECTED su DB: {e}")
+                return False
+
+        # 3. Controllo Ridondanza: se il tool è GIÀ al valore desiderato, non rieseguire!
         if old_value.upper() == str(new_value).upper() and not escalated:
             logger.info(f"[{self.name}] Saltata azione su '{target}': valore attuale già a '{old_value}'. In fase di stabilizzazione.")
             return False
 
-        # 3. Azionamento del Tool
+        # 4. Azionamento del Tool
         if tool_obj:
             try:
                 await tool_obj.set_tool_value(new_value)
@@ -108,7 +154,7 @@ class BaseAgent(ABC):
             except Exception as e:
                 logger.error(f"[{self.name}] Errore durante l'azionamento del tool '{target}': {e}")
 
-        # 4. Registrazione dell'evento con old_value e new_value nel DB SQLite
+        # 5. Registrazione dell'evento con old_value e new_value nel DB SQLite
         try:
             await self.event_log.log_event(
                 actor=self.name,

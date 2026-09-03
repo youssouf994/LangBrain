@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Any
 from langchain_core.messages import AIMessage
@@ -5,9 +6,22 @@ from langchain_core.messages import AIMessage
 from app.agents.base_agent import BaseAgent
 from app.graph.state import GraphState
 from app.tools.baseTool import BaseTool
-from app.tools.sensor_tools import get_default_iot_tools
+from app.tools.sensor_tools import get_default_iot_tools, get_tool
+from app.tools.tool_wrapper import force_execute_tool
 
 logger = logging.getLogger(__name__)
+
+# System prompt dedicato all'Arbitrato Semantico (Brain Override)
+_OVERRIDE_SYSTEM_PROMPT = (
+    "Sei il modulo di Arbitrato Semantico (Brain Override) di un sistema IoT N-Tier.\n"
+    "Il tuo compito è tradurre una direttiva umana complessa in un array JSON eseguibile.\n"
+    "L'utente può richiedere azioni multiple, come ignorare blocchi di sicurezza, accendere o spegnere dispositivi.\n\n"
+    "REGOLE TASSATIVE:\n"
+    '1. Restituisci ESCLUSIVAMENTE un array JSON valido. Niente markdown, niente backticks (```json), nessuna parola di saluto.\n'
+    "2. Il formato di ogni oggetto deve essere esattamente:\n"
+    '   {"target": "nome_del_dispositivo", "action": "UNBLOCK_AND_SET"|"TURN_OFF"|"TURN_ON", "value": "stringa o null"}\n'
+    "3. Se l'utente chiede esplicitamente di ignorare un vincolo, sbloccare, o forzare un'accensione con un valore specifico, usa l'azione UNBLOCK_AND_SET."
+)
 
 class BrainAgent(BaseAgent):
     """
@@ -88,11 +102,28 @@ class BrainAgent(BaseAgent):
         if current_readings_map:
             updates["readings"] = list(current_readings_map.values())
 
-        pending_escalations = state.get("pending_escalations", [])
+        pending_escalations = list(state.get("pending_escalations", []))
 
-        # --- CASO 1: Gestione Escalation Pendenti (Reconciliation) ---
+        # Se non ci sono escalation pendenti nello stato del grafo, verifica conflitti non ancora risolti nel DB
+        if not pending_escalations:
+            unresolved_events = [
+                e for e in recent_events
+                if not str(e.get("action", "")).startswith("RECONCILED_")
+                and not str(e.get("action", "")).startswith("RESOLVED_")
+                and not str(e.get("action", "")).startswith("UNBLOCKED")
+                and (str(e.get("action", "")).startswith("FORCE_") or e.get("escalated", False))
+            ]
+            for ev in unresolved_events:
+                pending_escalations.append({
+                    "source_agent": ev.get("actor", "agent_security"),
+                    "target_device": ev.get("target"),
+                    "proposed_action": ev.get("action"),
+                    "reason": ev.get("reasoning", "Conflitto non riconciliato nel DB audit log"),
+                })
+
+        # --- CASO 1: Gestione Escalation Pendenti / Conflitti DB (Reconciliation) ---
         if pending_escalations:
-            logger.info(f"[{self.name}] Inizio Reconciliation per {len(pending_escalations)} escalation...")
+            logger.info(f"[{self.name}] Inizio Reconciliation per {len(pending_escalations)} escalation/conflitti...")
             resolved_messages = []
 
             for esc in pending_escalations:
@@ -133,6 +164,18 @@ class BrainAgent(BaseAgent):
                         decision_val = str(human_payload).upper()
                         decision_reason = "Decisione fornita dall'utente via HITL API"
 
+                    # --- PERCORSO OVERRIDE: Arbitrato Semantico MAO → JSON → force_execute_tool ---
+                    if "OVERRIDE" in decision_val:
+                        logger.warning(f"[{self.name}] OVERRIDE ricevuto. Avvio Arbitrato Semantico per: '{decision_reason}'")
+                        override_msgs = await self._execute_semantic_override(
+                            human_directive=decision_reason,
+                            fallback_target=target,
+                            fallback_action=action,
+                        )
+                        resolved_messages.extend(override_msgs)
+                        # non serve continuare con la logica standard
+                        continue
+
                     if "APPROVA" in decision_val or "APPROVE" in decision_val or "YES" in decision_val:
                         decision_response = f"DECISIONE: APPROVA\nMOTIVAZIONE: {decision_reason}"
                     else:
@@ -151,7 +194,6 @@ class BrainAgent(BaseAgent):
                         escalated=False,
                         tools_map=self.tools
                     )
-                    # Fix 1: invalida gli eventi ESCALATION_PROPOSED nel DB per bloccare il loop
                     await self.event_log.mark_resolved(target)
                     status_text = "APPLICATA" if applied else "SALTATA (già a regime)"
                     resolved_messages.append(f"[{self.name}] Escalation APPROVATA [{status_text}] per {target} ({action}).")
@@ -164,7 +206,6 @@ class BrainAgent(BaseAgent):
                         escalated=False,
                         tools_map=self.tools
                     )
-                    # Fix 1: invalida gli eventi ESCALATION_PROPOSED anche se l'azione viene respinta
                     await self.event_log.mark_resolved(target)
                     resolved_messages.append(f"[{self.name}] Escalation RESPINTA per {target} su richiesta di {source}.")
 
@@ -187,6 +228,89 @@ class BrainAgent(BaseAgent):
             updates["next_agent"] = "END"
 
         return updates
+
+    async def _execute_semantic_override(
+        self,
+        human_directive: str,
+        fallback_target: str,
+        fallback_action: str,
+    ) -> list[str]:
+        """
+        Arbitrato Semantico: traduce la direttiva umana in linguaggio naturale
+        in un array JSON di comandi eseguibili via MAO, poi li esegue con force_execute_tool.
+        """
+        override_prompt = (
+            f"Direttiva umana da tradurre:\n\"{human_directive}\"\n\n"
+            f"Contesto: i dispositivi disponibili nel sistema includono {list(self.tools.keys())}.\n"
+            "Se la direttiva non specifica un dispositivo riconoscibile, usa il dispositivo di fallback: "
+            f"\"{fallback_target}\" con azione \"{fallback_action}\"."
+        )
+
+        raw_response = ""
+        try:
+            raw_response = self.ask_brain(
+                _OVERRIDE_SYSTEM_PROMPT,
+                override_prompt,
+                temperature=0.0,
+                max_tokens=1024,
+            )
+            logger.info(f"[{self.name}] Risposta MAO Semantic Override: {raw_response}")
+        except Exception as e:
+            logger.error(f"[{self.name}] MAO fallito nell'Arbitrato Semantico: {e}")
+
+        # Pulizia difensiva: rimuove backticks e markdown
+        cleaned = raw_response.strip()
+        for strip_token in ["```json", "```JSON", "```"]:
+            cleaned = cleaned.replace(strip_token, "")
+        cleaned = cleaned.strip()
+
+        # Parsing JSON
+        commands: list[dict] = []
+        try:
+            parsed = json.loads(cleaned)
+            if isinstance(parsed, list):
+                commands = parsed
+            elif isinstance(parsed, dict):
+                commands = [parsed]
+        except (json.JSONDecodeError, ValueError) as je:
+            logger.warning(f"[{self.name}] Impossibile parsare JSON dall'Override MAO: {je}. Risposta raw: {cleaned!r}")
+            # Fallback: azione di sblocco sul target originale dell'escalation
+            commands = [{"target": fallback_target, "action": "UNBLOCK_AND_SET", "value": fallback_action}]
+
+        messages_out = []
+        for cmd in commands:
+            cmd_target = str(cmd.get("target", fallback_target))
+            cmd_action = str(cmd.get("action", "UNBLOCK_AND_SET")).upper()
+            cmd_value  = cmd.get("value") or fallback_action
+
+            # Risolve il tool: usa il registro condiviso oppure ne crea uno on-demand
+            tool_obj = self.tools.get(cmd_target)
+            if tool_obj is None:
+                tool_obj = get_tool(cmd_target, initial_value="OFF", unit="")
+                self.tools[cmd_target] = tool_obj
+                logger.info(f"[Brain_Override] Tool '{cmd_target}' creato on-demand.")
+
+            final_value = cmd_value
+            if cmd_action == "TURN_OFF":
+                final_value = "OFF"
+            elif cmd_action == "TURN_ON" and (cmd_value is None or str(cmd_value).upper() == "NULL"):
+                final_value = "ON"
+
+            ok, msg = await force_execute_tool(
+                target=cmd_target,
+                tool_obj=tool_obj,
+                action=cmd_action,
+                new_value=final_value,
+                reasoning=f"Brain Override: {human_directive}",
+                event_log=self.event_log,
+            )
+
+            status = "✓ ESEGUITO" if ok else "✗ FALLITO"
+            log_msg = f"[Brain_Override] {status} — {cmd_action} su '{cmd_target}' → '{final_value}'"
+            logger.info(log_msg)
+            messages_out.append(log_msg)
+
+        return messages_out
 
     async def check_body_status(
         self, 

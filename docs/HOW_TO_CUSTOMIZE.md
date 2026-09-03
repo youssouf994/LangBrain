@@ -32,14 +32,15 @@ Tutti gli endpoint disponibili in FastAPI ([`app/api/main.py`](file:///home/logi
   ```
 
 #### `POST /graph/run`
-- **Descrizione:** Esegue un singolo ciclo del grafo agenti LangGraph.
+- **Descrizione:** Esegue un singolo ciclo del grafo agenti LangGraph per uno specifico `thread_id`.
 - **Request Body:**
   ```json
   {
     "sensor_readings": [
       { "sensor_id": "temp_living_room", "agent_owner": "api", "value": "30.0", "unit": "°C" }
     ],
-    "force_next_agent": "brain"
+    "force_next_agent": "brain",
+    "thread_id": "test-thread-123"
   }
   ```
 - **Risposta (200):**
@@ -229,6 +230,13 @@ Tutti gli endpoint disponibili in FastAPI ([`app/api/main.py`](file:///home/logi
   { "unblocked": true, "target": "ac_living_room", "reasoning": "Finestra chiusa: sblocco manuale via API" }
   ```
 
+#### `DELETE /system/reset`
+- **Descrizione:** Esegue un reset totale dell'ambiente: svuota il DB degli eventi/readings, rimuove gli agenti dinamici registrati, ripristina la configurazione HITL ai default e ricompila la topologia del grafo.
+- **Risposta (200):**
+  ```json
+  { "status": "reset_complete", "message": "Database svuotato, registro agenti resettato e grafo ricompilato." }
+  ```
+
 ---
 
 ### 🧠 5. Proxy LLM Centralizzato (MAO)
@@ -399,19 +407,60 @@ Gli interrupt HITL possono essere collocati **ovunque nel flusso del grafo** tra
 Quando l'esecuzione del grafo incontra un punto protetto:
 1. LangGraph sospende il ciclo invocando `interrupt()`.
 2. Puoi rilevare lo stato di pausa con `GET /graph/state`.
-3. Ripristina l'esecuzione inviando la decisione dell'operatore umano:
-   ```http
-   POST /graph/resume
-   Content-Type: application/json
+3. Ripristina l'esecuzione con `POST /graph/resume`, scegliendo una delle tre modalità:
 
-   {
-     "decision": "APPROVA",
-     "reasoning": "Intervento approvato via Dashboard Medica / Domotica",
-     "thread_id": "api_session"
-   }
-   ```
+#### Tre modalità di decisione
+
+| `decision` | Effetto |
+|---|---|
+| `APPROVA` | Il Brain scrive `RECONCILED_<action>` nel DB per ogni conflitto pendente e termina il ciclo. Il tool **non viene** azionato fisicamente. |
+| `RESPINGI` | Il Brain scrive `REJECTED_<action>` nel DB, il device rimane bloccato fino a TTL o unblock manuale. |
+| `OVERRIDE` | **God Mode Semantico**: il campo `reasoning` viene inviato al MAO con il prompt di Arbitrato Semantico. Il MAO traduce la frase in linguaggio naturale in un array JSON di comandi, eseguiti fisicamente via `force_execute_tool` che bypassa tutti i lock di priorità. |
+
+#### Esempio — APPROVA
+```http
+POST /graph/resume
+Content-Type: application/json
+
+{"decision": "APPROVA", "reasoning": "Intervento approvato via Dashboard", "thread_id": "api_session"}
+```
+
+#### Esempio — RESPINGI
+```http
+POST /graph/resume
+Content-Type: application/json
+
+{"decision": "RESPINGI", "reasoning": "Sicurezza prioritaria, non modificare", "thread_id": "api_session"}
+```
+
+#### Esempio — OVERRIDE (God Mode Semantico)
+Puoi scrivere la direttiva interamente in linguaggio naturale; il MAO si occupa di tradurla:
+```http
+POST /graph/resume
+Content-Type: application/json
+
+{
+  "decision": "OVERRIDE",
+  "reasoning": "Ignora il blocco dell'energia: mia nonna ha freddo. Accendi la stufa a 22 gradi e spegni la pompa della piscina.",
+  "thread_id": "api_session"
+}
+```
+
+Il sistema risponde con il log delle azioni fisicamente eseguite:
+```json
+{
+  "status": "resumed",
+  "decision_applied": "OVERRIDE",
+  "last_message": "[Brain_Override] ✓ ESEGUITO — UNBLOCK_AND_SET su 'heater_bedroom' → '22'\n[Brain_Override] ✓ ESEGUITO — TURN_OFF su 'pool_pump' → 'OFF'"
+}
+```
+
+> [!NOTE]
+> Il System Prompt di Arbitrato Semantico usato dal MAO è definito in [`app/graph/orchestrator.py`](file:///home/logichole/Scrivania/IoTBoilerplate/app/graph/orchestrator.py) come `_OVERRIDE_SYSTEM_PROMPT`.
+> Ogni azione OVERRIDE viene auditata nel DB con `actor: "Brain_Override"` e l'azione originale (es. `UNBLOCK_AND_SET`) per tracciabilità completa.
 
 ---
+
 
 ## 7. Gestione TTL (Time-To-Live) per i Blocchi
 I flag di controllo (es. `REJECTED`, `BLOCKED`) scadono automaticamente dopo `FLAG_TTL_MINUTES` (default: 60 min).

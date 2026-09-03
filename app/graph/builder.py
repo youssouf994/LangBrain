@@ -52,10 +52,109 @@ def wrap_node_with_hitl(node_name: str, agent_obj: Any):
 
             if "RESPINGI" in decision_val or "REJECT" in decision_val or "NO" in decision_val:
                 logger.info(f"[HITL Interceptor] Nodo '{node_name}' bloccato da rifiuto umano ({reasoning}).")
+                try:
+                    from app.tools.event_log import EventLog
+                    log = EventLog()
+                    events = await log.get_recent_events()
+                    for e in events:
+                        act = str(e.get("action", ""))
+                        if not act.startswith("RESOLVED_") and not act.startswith("RECONCILED_"):
+                            t = e.get("target")
+                            await log.log_event(
+                                actor="Brain",
+                                action=f"REJECTED_{act}",
+                                target=t,
+                                old_value=str(e.get("new_value", "UNKNOWN")),
+                                new_value="REJECTED",
+                                reasoning=f"Rifiuto umano via HITL: {reasoning}",
+                                escalated=False
+                            )
+                            await log.mark_resolved(t)
+                except Exception as ex:
+                    logger.error(f"[HITL Interceptor] Errore salvataggio REJECTED su DB: {ex}")
+
                 return {
                     "messages": [AIMessage(content=f"[HITL Interceptor] Nodo '{node_name}' annullato da approvazione umana ({reasoning}).")],
                     "next_agent": "END",
                 }
+
+            elif "OVERRIDE" in decision_val:
+                # ── GOD MODE SEMANTICO ─────────────────────────────────────────────────
+                # L'operatore umano ha inviato una direttiva in linguaggio naturale
+                # (campo 'reasoning') che bypassa i lock di priorità.
+                # Il Brain traduce la frase in comandi JSON ed esegue force_execute_tool.
+                logger.warning(
+                    f"[HITL Interceptor] OVERRIDE ricevuto per nodo '{node_name}'. "
+                    f"Avvio Arbitrato Semantico MAO. Direttiva: '{reasoning}'"
+                )
+                # Recupera i target dei conflitti pendenti (fallback per _execute_semantic_override)
+                fallback_target = "unknown"
+                fallback_action = "UNBLOCK_AND_SET"
+                try:
+                    from app.tools.event_log import EventLog
+                    log = EventLog()
+                    events = await log.get_recent_events()
+                    # Individua il primo target non ancora riconciliato
+                    for e in events:
+                        act = str(e.get("action", ""))
+                        if not act.startswith("RESOLVED_") and not act.startswith("RECONCILED_") and not act.startswith("UNBLOCKED"):
+                            fallback_target = e.get("target", fallback_target)
+                            fallback_action = e.get("action", fallback_action)
+                            break
+                except Exception as ex:
+                    logger.warning(f"[HITL Interceptor] Impossibile leggere eventi dal DB per override: {ex}")
+
+                # Delega _execute_semantic_override al BrainAgent (ha accesso ai tools)
+                override_msgs: list[str] = []
+                if hasattr(agent_obj, "_execute_semantic_override"):
+                    try:
+                        override_msgs = await agent_obj._execute_semantic_override(
+                            human_directive=reasoning,
+                            fallback_target=fallback_target,
+                            fallback_action=fallback_action,
+                        )
+                    except Exception as ov_ex:
+                        logger.error(f"[HITL Interceptor] Errore durante Semantic Override: {ov_ex}")
+                        override_msgs = [f"[OVERRIDE ERROR] {ov_ex}"]
+                else:
+                    override_msgs = [f"[HITL Interceptor] OVERRIDE ignorato: l'agente '{node_name}' non espone _execute_semantic_override."]
+
+                combined_msg = "\n".join(override_msgs) if override_msgs else f"[Brain_Override] Override eseguito su '{fallback_target}'."
+                return {
+                    "messages": [AIMessage(content=combined_msg)],
+                    "pending_escalations": [],
+                    "next_agent": "END",
+                }
+
+            else:
+                # Approvazione normale (APPROVA / YES)
+                if node_name == "brain":
+                    try:
+                        from app.tools.event_log import EventLog
+                        log = EventLog()
+                        events = await log.get_recent_events()
+                        for e in events:
+                            act = str(e.get("action", ""))
+                            if not act.startswith("RESOLVED_") and not act.startswith("RECONCILED_"):
+                                t = e.get("target")
+                                await log.log_event(
+                                    actor="Brain",
+                                    action=f"RECONCILED_{act}",
+                                    target=t,
+                                    old_value=str(e.get("new_value", "UNKNOWN")),
+                                    new_value="RECONCILED_OK",
+                                    reasoning=f"Approvazione umana via HITL: {reasoning}",
+                                    escalated=False
+                                )
+                                await log.mark_resolved(t)
+                    except Exception as ex:
+                        logger.error(f"[HITL Interceptor] Errore salvataggio RECONCILED su DB: {ex}")
+
+                    # Termina il ciclo evitando la prosecuzione non autorizzata
+                    return {
+                        "messages": [AIMessage(content=f"[HITL Interceptor] Nodo '{node_name}' approvato da decisione umana ({reasoning}).")],
+                        "next_agent": "END",
+                    }
 
         # 2. Esecuzione dell'agente reale
         if callable(getattr(agent_obj, "process", None)):

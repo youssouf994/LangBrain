@@ -67,6 +67,8 @@ class RunCycleRequest(BaseModel):
     """Payload per invocare un ciclo del grafo agenti."""
     sensor_readings: list[dict[str, Any]] = []
     force_next_agent: str = "brain"
+    thread_id: str | None = None
+    """Identificatore di thread per la persistenza del grafo ed il resume HITL."""
 
 
 class ToolWriteRequest(BaseModel):
@@ -135,7 +137,12 @@ class CreateSubAgentRequest(BaseModel):
 
 
 class HitlResumeRequest(BaseModel):
-    """Payload per riprendere l'esecuzione del grafo sospeso da un interrupt HITL."""
+    """Payload per riprendere l'esecuzione del grafo sospeso da un interrupt HITL.
+    
+    decision: 'APPROVA' approva l'azione proposta dall'agente.
+              'RESPINGI' rifiuta l'azione proposta.
+              'OVERRIDE' ignora i lock di priorità ed esegue la direttiva del campo 'reasoning' in linguaggio naturale.
+    """
     decision: str = "APPROVA"
     reasoning: str = "Approvato dall'utente tramite HITL API"
     thread_id: str | None = None
@@ -162,6 +169,8 @@ async def root():
 @app.post("/graph/run", tags=["Graph"])
 async def run_graph_cycle(body: RunCycleRequest):
     """Esegue un singolo ciclo del grafo agenti LangGraph."""
+    thread_id = body.thread_id or _THREAD_ID
+    config = {"configurable": {"thread_id": thread_id}}
     state = {
         "messages": [],
         "readings": body.sensor_readings,
@@ -171,9 +180,10 @@ async def run_graph_cycle(body: RunCycleRequest):
         "hitl_required": False,
         "config": {"readings_window_hours": 4},
     }
-    result = await _graph.ainvoke(state, config=_THREAD_CONFIG)
+    result = await _graph.ainvoke(state, config=config)
     messages = result.get("messages", [])
     return {
+        "thread_id": thread_id,
         "next_agent": result.get("next_agent"),
         "last_message": messages[-1].content if messages else None,
         "pending_escalations": result.get("pending_escalations", []),
@@ -324,20 +334,25 @@ async def list_tools():
 
 
 @app.get("/tools/{device_id}", tags=["IoT Tools"])
-async def get_tool(device_id: str):
-    """Legge il valore corrente di un tool specifico."""
+async def get_tool_endpoint(device_id: str):
+    """Legge il valore corrente di un tool. Se il dispositivo non è ancora registrato, viene creato on-demand con stato OFF."""
+    from app.tools.sensor_tools import get_tool as _get_tool
     tool = _shared_tools.get(device_id)
     if not tool:
-        raise HTTPException(status_code=404, detail=f"Tool '{device_id}' non trovato.")
+        # Creazione on-demand: registra il dispositivo nel registry singleton
+        tool = _get_tool(device_id, initial_value="OFF", unit="")
+        _shared_tools[device_id] = tool
     return {"device_id": device_id, "value": await tool.get_tool_value(), "unit": getattr(tool, "unit", "")}
 
 
 @app.post("/tools", tags=["IoT Tools"])
-async def set_tool(body: ToolWriteRequest):
-    """Imposta direttamente il valore di un tool (bypass agenti)."""
+async def set_tool_endpoint(body: ToolWriteRequest):
+    """Imposta direttamente il valore di un tool (bypass agenti). Crea il tool on-demand se non esiste."""
+    from app.tools.sensor_tools import get_tool as _get_tool
     tool = _shared_tools.get(body.target)
     if not tool:
-        raise HTTPException(status_code=404, detail=f"Tool '{body.target}' non trovato.")
+        tool = _get_tool(body.target, initial_value="OFF", unit="")
+        _shared_tools[body.target] = tool
     await tool.set_tool_value(body.value)
     return {"device_id": body.target, "new_value": await tool.get_tool_value()}
 
@@ -365,6 +380,9 @@ async def seed_conflict(body: SeedConflictRequest):
         reasoning=body.reasoning,
         escalated=False,
     )
+    tool = _shared_tools.get(body.target)
+    if tool:
+        await tool.set_tool_value(body.new_value)
     return {"seeded": True, "event": body.model_dump()}
 
 
@@ -427,3 +445,43 @@ async def macro_health_check():
     result = await brain.check_body_status(state, readings, recent_events)
     messages = result.get("messages", [])
     return {"result": messages[-1].content if messages else None}
+
+
+# --- System Reset Endpoint ---
+
+@app.delete("/system/reset", tags=["System"])
+async def reset_system_state():
+    """
+    Svuota il database degli eventi, cancella il registro degli agenti dinamici, 
+    ripristina la configurazione HITL e resetta lo stato dei tool IoT condivisi.
+    """
+    import aiosqlite
+    from app.db.database import DB_PATH
+    from app.graph.hitl_config import hitl_manager
+
+    # 1. Svuota le tabelle SQLite (events, readings, agents_registry)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM events")
+        await db.execute("DELETE FROM readings")
+        await db.execute("DELETE FROM agents_registry")
+        await db.commit()
+
+    # 2. Resetta HITL manager
+    hitl_manager.update_config(hitl_all=False, hitl_nodes=[], hitl_targets=[], hitl_actions=[], max_wait_seconds=None)
+
+    # 3. Resetta lo stato dei tool IoT condivisi
+    for name, tool in _shared_tools.items():
+        if hasattr(tool, "set_tool_value"):
+            if "lock" in name:
+                await tool.set_tool_value("LOCKED")
+            elif "alarm" in name:
+                await tool.set_tool_value("DISARMED")
+            elif "lights" in name:
+                await tool.set_tool_value("0%")
+            else:
+                await tool.set_tool_value("OFF")
+
+    # 4. Ricompila la topologia del grafo
+    await _recompile_system_graph()
+
+    return {"status": "reset_complete", "message": "Database svuotato, registro agenti resettato e grafo ricompilato."}

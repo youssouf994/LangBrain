@@ -70,14 +70,24 @@ class ClimateAgent(BaseAgent):
                 "messages": [AIMessage(content=f"[{self.name}] {target_device} bloccato ({current_status}). In attesa di sblocco esterno.")],
             }
 
-        # 3b. Esclude dal controllo conflitti gli eventi già riconciliati dal Brain
-        reconciled_events = [e for e in recent_events if str(e.get("action", "")).startswith("RECONCILED_")]
-        recently_reconciled = any(e.get("target") == target_device for e in reconciled_events)
-        unresolved_events = [
-            e for e in recent_events
-            if not str(e.get("action", "")).startswith("RECONCILED_")
-        ]
-        has_conflict, conflict_event = self.check_for_recent_conflict(target_device, unresolved_events)
+        # 3b. Trova l'evento più recente in ordine cronologico per questo target
+        target_events = [e for e in recent_events if e.get("target") == target_device]
+        target_events.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
+
+        has_conflict = False
+        recently_reconciled = False
+        conflict_event = None
+
+        if target_events:
+            latest_ev = target_events[0]
+            latest_act = str(latest_ev.get("action", ""))
+            latest_actor = str(latest_ev.get("actor", ""))
+
+            if latest_act.startswith("RECONCILED_") or latest_act.startswith("RESOLVED_") or latest_act.startswith("UNBLOCKED"):
+                recently_reconciled = True
+            elif (latest_act in ["FORCE_SHUTDOWN", "SECURITY_LOCK"] or latest_act.startswith("REJECTED_")) and latest_actor != self.name:
+                has_conflict = True
+                conflict_event = latest_ev
 
         # 4. Costruisce il prompt con le regole gerarchiche esplicite
         system_prompt = (
@@ -110,22 +120,19 @@ class ClimateAgent(BaseAgent):
 
         update: dict[str, Any] = {}
 
-        # 5. Gestione della decisione
-        if "DECISIONE: ESCALATE" in ai_response_str and has_conflict and not recently_reconciled:
-            # Fix 3: il sotto-agente NON aziona il tool — delega solo al Brain
-            reason = f"Conflitto non riconciliato rilevato: {ai_response}"
-            logger.warning(f"[{self.name}] Escalation inviata al Cervello per {target_device}")
+        # 5. Gestione della decisione: se c'è un conflitto non riconciliato con un altro agente (es. Sicurezza), ESCALA SEMPRE al Cervello
+        if has_conflict and not recently_reconciled:
+            reason = f"Conflitto attivo rilevato con '{conflict_event.get('actor', 'Sicurezza')}': {conflict_event.get('action', 'FORCE_SHUTDOWN')}"
+            logger.warning(f"[{self.name}] Escalation forzata al Cervello per {target_device}: {reason}")
 
-            # Fix 4: proposed_action usa il valore canonico (22.5°C), non una stringa macro
             escalation = self.create_escalation(
                 target_device=target_device,
                 proposed_action=AC_TARGET_VALUE,
                 reason=reason,
-                conflict_detected=has_conflict,
+                conflict_detected=True,
                 context_events=[conflict_event] if conflict_event else []
             )
 
-            # Solo audit log dell'intenzione, senza azionare il tool
             await self.event_log.log_event(
                 actor=self.name,
                 action="ESCALATION_PROPOSED",
@@ -138,9 +145,9 @@ class ClimateAgent(BaseAgent):
 
             update["pending_escalations"] = [escalation]
             update["next_agent"] = "brain"
-            update["messages"] = [AIMessage(content=f"[{self.name}] Escalation inviata al Cervello per {target_device}.")]
+            update["messages"] = [AIMessage(content=f"[{self.name}] Conflitto rilevato. Escalation inviata al Cervello per {target_device}.")]
 
-        elif "DECISIONE: ACTION" in ai_response_str or (current_temp > 26 and not has_conflict):
+        elif "DECISIONE: ACTION" in ai_response_str and not has_conflict:
             reasoning = f"Attivazione consigliata da AI: {ai_response_str}"
 
             applied = await self.apply_status(
