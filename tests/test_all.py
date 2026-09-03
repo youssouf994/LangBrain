@@ -402,6 +402,33 @@ try:
     r4, ms4 = run(timed_async(_check_body()))
     record("brain_agent.check_body_status", r4, duration_ms=ms4)
 
+    async def _semantic_override_on():
+        from app.tools.sensor_tools import get_default_iot_tools, get_tool
+        tools_o = get_default_iot_tools()
+        brain_override = BrainAgent(tools=list(tools_o.values()))
+        for target in ["main_breaker", "emergency_lights"]:
+            brain_override.tools[target] = get_tool(target, "OFF", "")
+            await brain_override.tools[target].set_tool_value("OFF")
+
+        with patch.object(
+            brain_override,
+            "ask_brain",
+            return_value='[{"target": "main_breaker", "action": "TURN_ON", "value": null}, {"target": "emergency_lights", "action": "TURN_ON", "value": null}]',
+        ):
+            msgs = await brain_override._execute_semantic_override(
+                human_directive="Riattiva main_breaker ed emergency_lights",
+                fallback_target="main_breaker",
+                fallback_action="FORCE_SHUTDOWN",
+            )
+
+        assert await brain_override.tools["main_breaker"].get_tool_value() == "ON"
+        assert await brain_override.tools["emergency_lights"].get_tool_value() == "ON"
+        assert all("FORCE_SHUTDOWN" not in m for m in msgs)
+        return True
+
+    r5, ms5 = run(timed_async(_semantic_override_on()))
+    record("brain_agent.override_turn_on_uses_on_state", r5, duration_ms=ms5)
+
 except Exception as e:
     record("brain_agent.*", False, traceback.format_exc(limit=4))
 

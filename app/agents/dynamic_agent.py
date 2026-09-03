@@ -45,10 +45,18 @@ class DynamicAgent(BaseAgent):
         self.parent_agent_name = parent_agent_name
         self.sub_agent_names = sub_agent_names or []
         self.level = level
+        self.tool_value_catalog = "\n".join(
+            f"- {target}: ['ON', 'OFF']" if any(token in str(target).lower() for token in ("breaker", "light", "lamp")) else
+            (f"- {target}: ['OPEN', 'CLOSED', '100%']" if any(token in str(target).lower() for token in ("valve", "air")) else f"- {target}: ['OFF', 'ON']")
+            for target in (managed_targets or [])
+        ) or "- Nessun target gestito."
         self.system_prompt_template = system_prompt_template or (
             f"Sei l'agente gerarchico '{name}' (Livello {level}). "
             f"Gestisci i target {managed_targets}. "
+            "Compila una checklist: target, stato attuale, valore valido, azione corretta.\n"
             "Devi decidere se eseguire un'azione (ACTION), fare escalation al Padre (ESCALATE), o fare nulla (NONE).\n"
+            "Valori validi permessi per i device sotto il tuo dominio:\n"
+            f"{self.tool_value_catalog}\n"
             "Rispondi ESATTAMENTE nel formato:\n"
             "DECISIONE: [ACTION|ESCALATE|NONE]\n"
             "MOTIVAZIONE: [spiegazione]"

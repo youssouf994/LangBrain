@@ -11,16 +11,76 @@ from app.tools.tool_wrapper import force_execute_tool
 
 logger = logging.getLogger(__name__)
 
+
+def _tool_value_catalog(tools: dict[str, Any] | None = None) -> str:
+    """Genera una checklist dei valori validi per gli attuatori in modo da guidare l'LLM."""
+    tools = tools or {}
+    catalog: list[str] = []
+    for name, tool_obj in tools.items():
+        device = str(name).lower()
+        if "valve" in device or "air" in device:
+            valid = ["OPEN", "CLOSED", "100%"]
+        elif "breaker" in device:
+            valid = ["ON", "OFF"]
+        elif "light" in device or "lamp" in device:
+            valid = ["ON", "OFF"]
+        elif "lock" in device or "door" in device:
+            valid = ["LOCKED", "UNLOCKED"]
+        elif "alarm" in device:
+            valid = ["ARMED", "DISARMED"]
+        else:
+            current = getattr(tool_obj, "_current_value", None)
+            valid = [str(v) for v in [current, "OFF", "ON", "OPEN", "CLOSED", "100%", "22.5°C"] if v not in (None, "")]
+        deduped: list[str] = []
+        for value in valid:
+            if value not in deduped:
+                deduped.append(value)
+        catalog.append(f"- {name}: {deduped}")
+    return "\n".join(catalog) if catalog else "- Nessun tool registrato."
+
+
+def _normalize_action_value(target: str, action: str, explicit_value: Any = None, fallback_value: Any = None) -> Any:
+    """Converte un comando in un valore di dispositivo reale; ignora flag/nomi di azione che non sono stati fisici."""
+    action_name = str(action or "").upper()
+    if action_name in {"TURN_ON", "TURN_OFF"}:
+        return "ON" if action_name == "TURN_ON" else "OFF"
+
+    candidate = explicit_value if explicit_value not in (None, "", "NULL", "null", "NONE", "none") else fallback_value
+    candidate_str = str(candidate).strip() if candidate is not None else ""
+    invalid_tokens = {
+        "TURN_ON", "TURN_OFF", "FORCE_SHUTDOWN", "SECURITY_LOCK", "UNBLOCK_AND_SET",
+        "REJECTED", "RECONCILED", "RESOLVED", "BLOCKED", "ESCALATION_PROPOSED", "NULL", "NONE"
+    }
+    if candidate_str and candidate_str.upper() not in invalid_tokens:
+        return candidate
+
+    device_name = str(target).upper()
+    if "VALVE" in device_name or "AIR" in device_name:
+        return "100%"
+    if "BREAKER" in device_name or "LIGHT" in device_name or "LOCK" in device_name or "ALARM" in device_name:
+        return "ON"
+    return "ON"
+
+
 # System prompt dedicato all'Arbitrato Semantico (Brain Override)
 _OVERRIDE_SYSTEM_PROMPT = (
     "Sei il modulo di Arbitrato Semantico (Brain Override) di un sistema IoT N-Tier.\n"
     "Il tuo compito è tradurre una direttiva umana complessa in un array JSON eseguibile.\n"
     "L'utente può richiedere azioni multiple, come ignorare blocchi di sicurezza, accendere o spegnere dispositivi.\n\n"
+    "Checklist obbligatoria prima di generare ogni comando:\n"
+    "1. Identifica target e azione corretta.\n"
+    "2. Verifica i valori validi del device e usa solo quelli del catalogo.\n"
+    "3. Se l'azione è TURN_ON -> il valore fisico deve essere ON.\n"
+    "4. Se l'azione è TURN_OFF -> il valore fisico deve essere OFF.\n"
+    "5. Non usare nomi di azione come valori (es. FORCE_SHUTDOWN, TURN_ON, TURN_OFF).\n\n"
     "REGOLE TASSATIVE:\n"
     '1. Restituisci ESCLUSIVAMENTE un array JSON valido. Niente markdown, niente backticks (```json), nessuna parola di saluto.\n'
     "2. Il formato di ogni oggetto deve essere esattamente:\n"
     '   {"target": "nome_del_dispositivo", "action": "UNBLOCK_AND_SET"|"TURN_OFF"|"TURN_ON", "value": "stringa o null"}\n'
-    "3. Se l'utente chiede esplicitamente di ignorare un vincolo, sbloccare, o forzare un'accensione con un valore specifico, usa l'azione UNBLOCK_AND_SET."
+    "3. Se l'utente chiede esplicitamente di ignorare un vincolo, sbloccare, o forzare un'accensione con un valore specifico, usa l'azione UNBLOCK_AND_SET.\n"
+    "4. Usa il catalogo dei valori validi del dispositivo e non inventare stati arbitrari.\n"
+    "Catalogo valori validi per i tool:\n"
+    "{tool_catalog}\n"
 )
 
 class BrainAgent(BaseAgent):
@@ -43,12 +103,16 @@ class BrainAgent(BaseAgent):
 
         # Prompt configurabili da .env
         import os
+        self.tool_value_catalog = _tool_value_catalog(self.tools)
         self.system_prompt = (
             os.getenv("BRAIN_SYSTEM_PROMPT")
             or (
                 "Sei l'Orchestratore Supremo della Smart Home. "
                 "Hai ricevuto un'escalation da un sotto-agente per un conflitto o un'anomalia. "
                 "Hai visibilità su tutte le letture dei sensori delle ultime ore e sugli eventi recenti. "
+                "Compila una checklist: target, azione proposta, valore valido per device, decisione finale.\n"
+                "Catalogo valori validi per i device:\n"
+                f"{self.tool_value_catalog}\n"
                 "Valuta il contesto e decidi se APPROVARE o RESPINGERE l'azione.\n"
                 "Formato Risposta:\n"
                 "DECISIONE: [APPROVA|RESPINGI]\n"
@@ -242,6 +306,8 @@ class BrainAgent(BaseAgent):
         override_prompt = (
             f"Direttiva umana da tradurre:\n\"{human_directive}\"\n\n"
             f"Contesto: i dispositivi disponibili nel sistema includono {list(self.tools.keys())}.\n"
+            f"Catalogo valori validi:\n{_tool_value_catalog(self.tools)}\n\n"
+            "Checklist: target corretto, azione corretta, valore valido per il device, e mai usare il nome dell'azione come stato.\n"
             "Se la direttiva non specifica un dispositivo riconoscibile, usa il dispositivo di fallback: "
             f"\"{fallback_target}\" con azione \"{fallback_action}\"."
         )
@@ -249,7 +315,7 @@ class BrainAgent(BaseAgent):
         raw_response = ""
         try:
             raw_response = self.ask_brain(
-                _OVERRIDE_SYSTEM_PROMPT,
+                _OVERRIDE_SYSTEM_PROMPT.format(tool_catalog=_tool_value_catalog(self.tools)),
                 override_prompt,
                 temperature=0.0,
                 max_tokens=1024,
@@ -274,14 +340,14 @@ class BrainAgent(BaseAgent):
                 commands = [parsed]
         except (json.JSONDecodeError, ValueError) as je:
             logger.warning(f"[{self.name}] Impossibile parsare JSON dall'Override MAO: {je}. Risposta raw: {cleaned!r}")
-            # Fallback: azione di sblocco sul target originale dell'escalation
-            commands = [{"target": fallback_target, "action": "UNBLOCK_AND_SET", "value": fallback_action}]
+            # Fallback: usa la semantica del target, non il nome dell'azione di sicurezza.
+            commands = [{"target": fallback_target, "action": "UNBLOCK_AND_SET", "value": None}]
 
         messages_out = []
         for cmd in commands:
             cmd_target = str(cmd.get("target", fallback_target))
             cmd_action = str(cmd.get("action", "UNBLOCK_AND_SET")).upper()
-            cmd_value  = cmd.get("value") or fallback_action
+            cmd_value = cmd.get("value")
 
             # Risolve il tool: usa il registro condiviso oppure ne crea uno on-demand
             tool_obj = self.tools.get(cmd_target)
@@ -290,11 +356,7 @@ class BrainAgent(BaseAgent):
                 self.tools[cmd_target] = tool_obj
                 logger.info(f"[Brain_Override] Tool '{cmd_target}' creato on-demand.")
 
-            final_value = cmd_value
-            if cmd_action == "TURN_OFF":
-                final_value = "OFF"
-            elif cmd_action == "TURN_ON" and (cmd_value is None or str(cmd_value).upper() == "NULL"):
-                final_value = "ON"
+            final_value = _normalize_action_value(cmd_target, cmd_action, cmd_value, fallback_action)
 
             ok, msg = await force_execute_tool(
                 target=cmd_target,
