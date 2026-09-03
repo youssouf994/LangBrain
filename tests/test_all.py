@@ -564,6 +564,34 @@ try:
 except Exception as e:
     record("hitl.schemas", False, str(e))
 
+try:
+    from app.graph.hitl_config import hitl_manager, HitlConfigSchema
+
+    hitl_manager.update_config(
+        hitl_all=False,
+        hitl_nodes=["organ_security"],
+        hitl_targets=["front_door_lock"],
+        hitl_actions=["FORCE_SHUTDOWN"],
+        max_wait_seconds=120,
+    )
+    cfg = hitl_manager.get_config()
+    assert cfg.hitl_nodes == ["organ_security"]
+    assert cfg.hitl_targets == ["front_door_lock"]
+    assert cfg.hitl_actions == ["FORCE_SHUTDOWN"]
+    assert cfg.max_wait_seconds == 120
+
+    # Test decision logic
+    assert hitl_manager.should_interrupt("organ_security", {}) is True
+    assert hitl_manager.should_interrupt("agent_climate", {}) is False
+    assert hitl_manager.should_interrupt("agent_climate", {}, proposed_target="front_door_lock") is True
+    assert hitl_manager.should_interrupt("agent_climate", {}, proposed_action="FORCE_SHUTDOWN") is True
+
+    # Reset
+    hitl_manager.update_config(hitl_all=False, hitl_nodes=[], hitl_targets=[], hitl_actions=[], max_wait_seconds=None)
+    record("hitl.dynamic_config_manager", True)
+except Exception as e:
+    record("hitl.dynamic_config_manager", False, str(e))
+
 
 # ── SEZIONE 13: Dynamic Sub-Agents & Hierarchy ──────────────────────────────
 print("\n[13] Dynamic Sub-Agents & Hierarchy")

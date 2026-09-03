@@ -362,29 +362,58 @@ Quando crei o aggiorni un sotto-agente via API REST o nel file di configurazione
 
 ---
 
-## 6. Configurazione Human-in-the-Loop (HITL) e TTL
+## 6. Configurazione Dinamica Human-in-the-Loop (HITL) e TTL
 
-### Attivare HITL per Escalation Critiche
-Nel `.env` o nello stato del grafo:
-```env
-HITL_TARGETS=["front_door_lock", "alarm_system"]
-```
+Gli interrupt HITL possono essere collocati **ovunque nel flusso del grafo** tramite il wrapper universale in [`app/graph/builder.py`](file:///home/logichole/Scrivania/IoTBoilerplate/app/graph/builder.py) e gestiti dinamicamente via API senza riavviare il sistema.
 
-Quando scatta un'escalation su un target critico:
-1. LangGraph invoca `interrupt()` e sospende il grafo.
-2. Controlla lo stato con `GET /graph/state`.
-3. Risolvi la sospensione inviando la decisione umana:
+### A. Configurare i punti di Interrupt HITL ed Attesa Massima via API
+
+#### `GET /hitl/config`
+- **Descrizione:** Legge la configurazione HITL attiva.
+- **Risposta (200):**
+  ```json
+  {
+    "hitl_all": false,
+    "hitl_nodes": ["organ_security", "brain"],
+    "hitl_targets": ["front_door_lock", "cardiac_pacemaker"],
+    "hitl_actions": ["FORCE_SHUTDOWN", "UNLOCK"],
+    "max_wait_seconds": 120
+  }
+  ```
+
+#### `POST /hitl/config`
+- **Descrizione:** Imposta o aggiorna a runtime le regole di intercettazione e l'attesa massima (`max_wait_seconds`).
+- **Request Body:**
+  ```json
+  {
+    "hitl_all": false,
+    "hitl_nodes": ["organ_security"],
+    "hitl_targets": ["cardiac_pacemaker"],
+    "hitl_actions": ["CRITICAL_ARHYTHMIA_ESCALATION"],
+    "max_wait_seconds": 300
+  }
+  ```
+
+### B. Gestione dell'Interrupt e Resume del Grafo
+
+Quando l'esecuzione del grafo incontra un punto protetto:
+1. LangGraph sospende il ciclo invocando `interrupt()`.
+2. Puoi rilevare lo stato di pausa con `GET /graph/state`.
+3. Ripristina l'esecuzione inviando la decisione dell'operatore umano:
    ```http
    POST /graph/resume
    Content-Type: application/json
 
    {
      "decision": "APPROVA",
-     "reasoning": "Approvato dal proprietario di casa via dashboard"
+     "reasoning": "Intervento approvato via Dashboard Medica / Domotica",
+     "thread_id": "api_session"
    }
    ```
 
-### Gestione TTL (Time-To-Live) per i Blocchi
+---
+
+## 7. Gestione TTL (Time-To-Live) per i Blocchi
 I flag di controllo (es. `REJECTED`, `BLOCKED`) scadono automaticamente dopo `FLAG_TTL_MINUTES` (default: 60 min).
 Per sbloccare manualmente un dispositivo congelato:
 ```http
@@ -396,4 +425,5 @@ Content-Type: application/json
   "reasoning": "Finestra chiusa: sblocco manuale via API"
 }
 ```
+
 

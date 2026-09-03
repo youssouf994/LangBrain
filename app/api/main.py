@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from app.agents.agent_registry import AgentRegistry
 from app.db.database import Database
 from app.graph.builder import build_graph
+from app.graph.hitl_config import HitlConfigSchema
 from app.tools.event_log import EventLog
 
 # ---------------------------------------------------------------------------
@@ -210,6 +211,31 @@ async def resume_graph(body: HitlResumeRequest):
         "last_message": messages[-1].content if messages else None,
         "next_agent": result.get("next_agent"),
     }
+
+
+# --- Human-in-the-Loop (HITL) Dynamic Config ---
+
+@app.get("/hitl/config", tags=["Human-in-the-Loop"])
+async def get_hitl_config():
+    """Restituisce la configurazione dinamica dei punti di interrupt HITL e l'attesa massima."""
+    from app.graph.hitl_config import hitl_manager
+    return hitl_manager.get_config()
+
+
+@app.post("/hitl/config", tags=["Human-in-the-Loop"])
+async def update_hitl_config(body: HitlConfigSchema):
+    """
+    Imposta dinamica dei punti di interrupt HITL (nodi, target sensori, azioni) e l'attesa massima.
+    """
+    from app.graph.hitl_config import hitl_manager
+    updated = hitl_manager.update_config(
+        hitl_all=body.hitl_all,
+        hitl_nodes=body.hitl_nodes,
+        hitl_targets=body.hitl_targets,
+        hitl_actions=body.hitl_actions,
+        max_wait_seconds=body.max_wait_seconds,
+    )
+    return {"status": "updated", "config": updated}
 
 
 # --- Dynamic Sub-Agents & Hierarchy Management ---
