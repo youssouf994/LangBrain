@@ -194,4 +194,4 @@ python3 tests/test_all.py
 
 ## 📄 Licenza
 
-MIT License. Libero per utilizzi commerciali e personali.
+Polyform Small Business License 1.0.0, libero per uso personale ed aziendale fino a soglia di fatturato.
