@@ -4,7 +4,7 @@ venv/
 *.db
 __pycache__/
 test_results.json
-PROJECT_STATUS.md
+
 
 # Python artifacts
 *.py[cod]
