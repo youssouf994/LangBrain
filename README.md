@@ -22,6 +22,19 @@ Il tuo corpo non funziona così. Se metti la mano su una piastra bollente, **non
 Questo boilerplate replica esattamente questa logica:
 
 - **Il Cervello (Orchestratore Supremo - Livello 0)** — pensa in modo ciclico, guarda la storia recente e decide aggiustamenti strategici o risoluzioni di conflitti.
+
+
+Aggiornamenti recenti (2026-09-04): il repository include alcune correzioni di stabilità e sicurezza esercitate dagli smoke test. Aggiornamenti principali:
+
+- Checkpointer persistente in-process (wrapper file-backed attorno a `InMemorySaver`) per ridurre la perdita di stato alla ricompilazione del grafo (`app/checkpointer.py`).
+- Ricompilazione del grafo protetta da `asyncio.Lock` e sostituzione più sicura di `_shared_tools` (`app/api/main.py`).
+- `BaseAgent.apply_status()` ora segnala correttamente il successo dell'attuazione e fallisce quando l'attuazione del tool o il logging sul DB falliscono.
+- `check_priority_lock()` applica il `priority_weight` configurato nel registro agenti; `Brain` mantiene la priorità più alta.
+- L'opzione HITL `allow_override` è configurabile via API; è disponibile una modalità di test del MAO (`MAO_ENABLE_MOCK=1`) per evitare chiamate a provider esterni durante lo sviluppo.
+- Script smoke aggiornato e documentato: `examples/deep_hierarchy_smoke.sh` (gerarchia a 6 livelli che esercita HITL/OVERRIDE).
+- La suite di test e le regressioni sono eseguibili localmente; i test principali sono stati eseguiti con esito positivo nell'ambiente di audit.
+
+Questi cambiamenti migliorano l'esperienza di sviluppo e rendono i flussi demo più deterministici; non rendono il progetto pronto per la produzione (autenticazione, checkpointer DB-persistent e RBAC restano da implementare).
 - **Gli Organi & Componenti (Sotto-agenti N-Livelli)** — specializzati per macro-aree o periferiche. Reagiscono in autonomia entro le loro soglie di competenza, ed **escalano al Padre** quando la situazione è ambigua o conflittuale.
 - **Il Sistema Nervoso (Event Log & Audit)** — è il canale attraverso cui ogni agente registra cosa ha fatto e legge le azioni recenti per evitare conflitti o sovrascrizioni.
 

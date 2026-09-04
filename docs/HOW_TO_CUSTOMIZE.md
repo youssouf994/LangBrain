@@ -24,6 +24,8 @@ Il timeout delle richieste LLM è `40` secondi per default. Puoi modificarlo nel
 
 ```dotenv
 MAO_TIMEOUT_SECONDS=40
+
+Nota (2026-09-04): il progetto contiene un'opzione di testing per evitare di chiamare provider esterni durante lo sviluppo: impostando `MAO_ENABLE_MOCK=1` l'oggetto `Mao` restituisce una risposta canned JSON utile per testare i flussi di `OVERRIDE` senza chiavi LLM.
 ```
 
 ### Avvio con Docker Compose
@@ -455,6 +457,11 @@ Quando l'esecuzione del grafo incontra un punto protetto:
 1. LangGraph sospende il ciclo invocando `interrupt()`.
 2. Puoi rilevare lo stato di pausa con `GET /graph/state`.
 3. Ripristina l'esecuzione con `POST /graph/resume`, scegliendo una delle tre modalità:
+
+Nota implementativa (2026-09-04):
+- Il builder usa ora un checkpointer persistente in-process (file-backed `InMemorySaver`) per ridurre la perdita di stato tra ricompilazioni; vedi `app/checkpointer.py`.
+- La ricompilazione del grafo e la sostituzione di `_shared_tools` avvengono sotto un lock asincrono per ridurre race condition in scenari di richieste concorrenti.
+- `max_wait_seconds` rimane metadata passato all'interrupt payload; non esiste ancora un timeout automatico server-side che forzi un fallback.
 
 #### Tre modalità di decisione
 

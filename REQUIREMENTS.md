@@ -51,6 +51,11 @@ I dispositivi non pre-registrati vengono creati automaticamente come `IoTDeviceT
 ### Timeout MAO e contratti di dominio
 
 - Il MAO usa client asincroni e un timeout HTTP configurato da `MAO_TIMEOUT_SECONDS` (default: `40` secondi).
+- Il MAO usa client asincroni e un timeout HTTP configurato da `MAO_TIMEOUT_SECONDS` (default: `40` secondi).
+
+Nota operativa (2026-09-04):
+- È stata aggiunta una variabile di ambiente di sviluppo `MAO_ENABLE_MOCK` (valore `1`) che abilita una risposta mock del MAO per test locali senza credenziali LLM.
+- Il progetto include ora un checkpointer persistente in-process (file-backed InMemorySaver) in `app/checkpointer.py`. Questo riduce la perdita di stato su ricompilazioni in-process ma non sostituisce una soluzione persistente cross-process come Postgres/Redis.
 - `LOCAL_MODEL_BASE_URL` configura l'accesso locale; `LOCAL_MODEL_DOCKER_BASE_URL` configura l'endpoint visto dal container. Su una macchina LAN possono coincidere.
 - `LOCAL_MODEL` deve corrispondere esattamente a un ID restituito dall'endpoint OpenAI-compatible `/v1/models`.
 - La semantica e la normalizzazione di `action`, `old_value` e `new_value` sono contratti del dominio applicativo. Ogni sviluppatore deve validare i valori ammessi nel proprio tool/agente; il core non converte automaticamente azioni simboliche in stati fisici.

@@ -89,29 +89,29 @@ LangBrain/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
-├── test_results.json               # Esito in tempo reale della suite di test
-├── .env                            # Provider LLM e Prompt configurabili del Brain
-├── .env.example                    # Template di configurazione senza segreti
+├── test_results.json               # Real-time result of the test suite
+├── .env                            # LLM provider and Brain prompts configuration
+├── .env.example                    # Template configuration file (no secrets)
 ├── app/
 │   ├── MAO/
-│   │   └── model_access_object.py  # Mao (Model Access Object per LLM locale/OpenAI API)
+│   │   └── model_access_object.py  # MAO (Model Access Object for local/OpenAI-compatible LLMs)
 │   ├── agents/
-│   │   ├── base_agent.py           # Classe base astratta per sotto-agenti
-│   │   ├── agent_climate.py        # Sotto-agente Clima nativo
-│   │   ├── dynamic_agent.py        # Agente Dinamico Livello N configurabile
-│   │   ├── agent_registry.py       # Registro gerarchico salvato su DB SQLite
-│   │   └── medical_agents.py       # Agenti Fisiologici (Cardiovascolare, Respiratorio)
+│   │   ├── base_agent.py           # Abstract base class for sub-agents
+│   │   ├── agent_climate.py        # Native Climate sub-agent
+│   │   ├── dynamic_agent.py        # Configurable N-Level Dynamic Agent
+│   │   ├── agent_registry.py       # Hierarchical registry persisted in SQLite
+│   │   └── medical_agents.py       # Physiological agents (Cardiovascular, Respiratory)
 │   ├── graph/
-│   │   ├── orchestrator.py         # Cervello (BrainAgent - Livello 0)
-│   │   ├── builder.py              # Builder del grafo LangGraph con wrapper HITL
-│   │   ├── hitl_config.py          # Manager della configurazione dinamica HITL
-│   │   └── state.py                # GraphState condiviso
+│   │   ├── orchestrator.py         # Brain (BrainAgent - Level 0)
+│   │   ├── builder.py              # LangGraph builder with HITL wrapper
+│   │   ├── hitl_config.py          # Dynamic HITL configuration manager
+│   │   └── state.py                # Shared GraphState
 │   ├── tools/
-│   │   ├── baseTool.py             # Classe base astratta per i tool
-│   │   ├── tool_wrapper.py         # execute_tool_safely (controllo priorità) + force_execute_tool (God Mode Override)
+│   │   ├── baseTool.py             # Abstract base class for tools
+│   │   ├── tool_wrapper.py         # execute_tool_safely (priority checks) + force_execute_tool (Override)
 │   │   ├── event_log.py            # log_event(), mark_resolved(), unblock_target()
-│   │   ├── sensor_tools.py         # Tool mock per sensori/attuatori IoT (creazione on-demand singleton)
-│   │   └── medical_tools.py        # Tool medici (Pacemaker, SpO2, Normalizzatore)
+│   │   ├── sensor_tools.py         # Mock tools for IoT sensors/actuators (on-demand singleton)
+│   │   └── medical_tools.py        # Medical tools (Pacemaker, SpO2, Normalizer)
 │   ├── db/
 │   │   └── database.py             # SQLite setup (tabelle events, readings, agents_registry)
 │   ├── api/
@@ -120,9 +120,9 @@ LangBrain/
 │       └── tracing.py              # Logging strutturato / tracing
 ├── examples/
 │   ├── hierarchical_pattern/
-│   │   └── demo_hierarchy.py       # Demo Gerarchia Smart Home N-Livelli
+│   │   └── demo_hierarchy.py       # Smart Home Hierarchy Demo (N-levels)
 │   └── medical_homeostasis/
-│       └── demo_medical_homeostasis.py # Demo Omeostasi Fisiologica Medica
+│       └── demo_medical_homeostasis.py # Medical homeostasis demo
 └── docs/
     └── HOW_TO_CUSTOMIZE.md
 ```

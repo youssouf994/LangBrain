@@ -151,6 +151,12 @@ class Mao:
         target_provider = (provider or self.default_provider).lower()
         logger.debug(f"[MAO] call_model -> provider richiesto: '{target_provider}'")
 
+        # Supporto di debug/test: MOCK provider via env var per flussi OVERRIDE senza chiavi
+        if os.getenv("MAO_ENABLE_MOCK", "0").strip() == "1":
+            logger.info("[MAO] MOCK mode abilitato via MAO_ENABLE_MOCK=1 — restituisco risposta canned.")
+            # Un JSON di esempio che il Brain può parsare per eseguire un UNBLOCK_AND_SET
+            return '[{"target": "device_l3", "action": "UNBLOCK_AND_SET", "value": "ON"}]'
+
         # Mappatura alias rapida
         if target_provider in ("google", "gemini"):
             target_provider = "google_studio"

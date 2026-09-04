@@ -95,8 +95,36 @@ class BaseAgent(ABC):
                     if is_flag_expired(ts, ttl_minutes=self.conflict_window_minutes):
                         continue
 
-                    if actor != self.name and (action in ["FORCE_SHUTDOWN", "SECURITY_LOCK"] or is_control_flag(new_val) or new_val == "OFF"):
-                        return False, f"Dispositivo '{target}' bloccato da '{actor}' con azione '{action}' ({new_val})"
+                    # Solo consideriamo blocchi imposti da attori diversi dall'agente corrente
+                    if actor and actor != self.name and (action in ["FORCE_SHUTDOWN", "SECURITY_LOCK"] or is_control_flag(new_val) or new_val == "OFF"):
+                        # Recupera il peso di priorità dell'attore (se registrato)
+                        actor_weight = None
+                        try:
+                            # Import locale per evitare cicli
+                            from app.agents.agent_registry import AgentRegistry
+                            registry = AgentRegistry(db_path=self.event_log.db_path)
+                            configs = await registry.get_all_agent_configs()
+                            for cfg in configs:
+                                if str(cfg.get("name")) == actor:
+                                    actor_weight = float(cfg.get("priority_weight", 1.0))
+                                    break
+                        except Exception:
+                            # Se non riusciamo a leggere il registro non falliamo il controllo: consideriamo l'attore come "alto" per sicurezza
+                            actor_weight = None
+
+                        # Brain ha per design priorità massima
+                        if actor == "Brain":
+                            actor_weight = float("inf")
+
+                        # Se abbiamo un peso e questo è maggiore del peso dell'agente corrente, allora il blocco tiene
+                        try:
+                            if actor_weight is None:
+                                # comportamento conservativo: se non conosciamo il peso, consideriamo il blocco valido
+                                return False, f"Dispositivo '{target}' bloccato da '{actor}' con azione '{action}' ({new_val})"
+                            if float(actor_weight) > float(self.priority_weight):
+                                return False, f"Dispositivo '{target}' bloccato da '{actor}' (priorità {actor_weight} > {self.priority_weight})"
+                        except Exception:
+                            return False, f"Dispositivo '{target}' bloccato da '{actor}' con azione '{action}' ({new_val})"
         except Exception as e:
             logger.error(f"[{self.name}] Errore durante la verifica dei blocchi di priorità: {e}")
 
@@ -118,6 +146,7 @@ class BaseAgent(ABC):
         """
         old_value = "UNKNOWN"
         tool_obj = tools_map.get(target) if tools_map else None
+        applied_ok = True
 
         # 1. Legge il valore attuale reale dal tool
         if tool_obj:
@@ -157,6 +186,12 @@ class BaseAgent(ABC):
                 logger.info(f"[{self.name}] Tool '{target}' azionato: {old_value} -> {new_value}")
             except Exception as e:
                 logger.error(f"[{self.name}] Errore durante l'azionamento del tool '{target}': {e}")
+                applied_ok = False
+        else:
+            # Se non esiste il tool e non siamo in un'escalation, consideriamo il tentativo come non applicato
+            if not escalated:
+                logger.warning(f"[{self.name}] Tool '{target}' non trovato nella mappa tools: azione non applicata.")
+                applied_ok = False
 
         # 5. Registrazione dell'evento con old_value e new_value nel DB SQLite
         try:
@@ -171,8 +206,9 @@ class BaseAgent(ABC):
             )
         except Exception as e:
             logger.error(f"[{self.name}] Errore durante il salvataggio su DB: {e}")
+            applied_ok = False
 
-        return True
+        return applied_ok
 
     def check_for_recent_conflict(self, target: str, recent_events: list[dict], ignore_actor: str | None = None) -> tuple[bool, dict | None]:
         """

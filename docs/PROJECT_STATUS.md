@@ -2,7 +2,7 @@
 
 Audit statico iniziale eseguito il 4 settembre 2026 e aggiornato dopo i fix e gli smoke test Docker dello stesso giorno. La suite di regressione viene ora eseguita in un container Python isolato; le osservazioni storiche corrette sono marcate come tali nelle sezioni seguenti.
 
-> **Aggiornamento corrente:** corretti caricamento eventi DB, routing case-insensitive, propagazione gerarchica, fallback `next_agent`, client LLM sincrono, gestione errori `/llm/invoke`, timeout MAO e smoke test UTF-8/HITL Override. Il timeout MAO è configurabile con `MAO_TIMEOUT_SECONDS` (default 40 secondi). Docker raggiunge modelli OpenAI-compatible su host o LAN tramite `LOCAL_MODEL_DOCKER_BASE_URL`. La normalizzazione degli stati fisici resta intenzionalmente un contratto a carico dello sviluppatore del dominio.
+> **Aggiornamento corrente:** corretti caricamento eventi DB, routing case-insensitive, propagazione gerarchica, fallback `next_agent`, client LLM asincrono, gestione errori `/llm/invoke`, timeout MAO e smoke test UTF-8/HITL Override. Aggiornamenti recenti (2026-09-04): implementato un checkpointer persistente in-process (file-backed `InMemorySaver`), `BaseAgent.apply_status()` ora riporta correttamente l'esito, `check_priority_lock()` applica il `priority_weight` preso dal registro agenti, e la ricompilazione del grafo è ora protetta da un lock asincrono per ridurre race condition. Il timeout MAO è configurabile con `MAO_TIMEOUT_SECONDS` (default 40 secondi). Docker raggiunge modelli OpenAI-compatible su host o LAN tramite `LOCAL_MODEL_DOCKER_BASE_URL`. La normalizzazione degli stati fisici resta intenzionalmente un contratto a carico dello sviluppatore del dominio.
 
 ## Sintesi esecutiva
 
@@ -49,7 +49,7 @@ Non risultano cartelle vuote, esclusa la normale struttura interna di `.git` che
 | `.env` | Presente nell'albero di README e REQUIREMENTS | Presente localmente e correttamente ignorato da Git | `.env.example` documenta anche timeout MAO e URL locale/Docker. |
 | `test_results.json` | Presente e aggiornato dalla suite | Assente e ignorato da Git | Il README promette un artefatto che non è versionato. |
 | `docker-compose.yml` | Containerizzazione pronta | Servizio operativo con build, health check, volume SQLite ed env | Funzionante per sviluppo/demo; non production-ready. |
-| `app/checkpointer.py` | Checkpointer persistente | File presente ma vuoto; il grafo usa `MemorySaver` direttamente in `builder.py` | Dichiarazione fuorviante. |
+| `app/checkpointer.py` | Checkpointer persistente | Implementato: wrapper file-backed su `InMemorySaver` per ridurre perdita di stato tra ricompilazioni in-process (non un DB ACID cross-process). | Migliora la resilienza in-process; richiede comunque un backend persistente per deploy multi-worker. |
 | `app/observability/tracing.py` | Tracing/logging strutturato | File vuoto | Placeholder. |
 | `run_loop.py` | Non mostrato negli alberi dichiarati | Presente e contiene il loop event-driven | File applicativo importante non documentato nella struttura. |
 | `app/core/` | Non mostrato negli alberi dichiarati | Presente con costanti TTL/control flag | Modulo reale non documentato. |
@@ -78,7 +78,7 @@ Legenda richiesta: **Completo e testato** / **Funzionante ma non testato a fondo
 | MAO / accesso modelli | **Funzionante ma non testato a fondo** | Usa `AsyncOpenAI`, timeout `MAO_TIMEOUT_SECONDS` (40 secondi di default), esclusione provider senza credenziali e fallback configurabile. Testato con mock e con un modello OpenAI-compatible su LAN; mancano circuit breaker e test di carico. |
 | API FastAPI | **Funzionante ma non testato a fondo** | Gli endpoint principali e lo smoke test sono operativi; `/llm/invoke` converte i fallimenti provider in `503` controllato. Mancano autenticazione, concorrenza, streaming e WebSocket. |
 | HITL | **Funzionante ma non testato a fondo** | Config manager, wrapper, interrupt/resume e Override sono coperti da regressioni e smoke test. `max_wait_seconds` resta metadata e non implementa timeout/fallback automatico. Esistono due livelli HITL parzialmente sovrapposti (wrapper e Brain). |
-| Checkpointer | **Placeholder/stub** | `app/checkpointer.py` è vuoto. `MemorySaver` offre resume solo in memoria e viene ricreato a ogni ricompilazione/restart. |
+| Checkpointer | **Funzionante ma non production** | `app/checkpointer.py` ora fornisce una semplice implementazione persistente (pickle) su disco attorno a `InMemorySaver`. Riduce perdita di stato tra ricompilazioni nello stesso processo ma non è una persistenza robusta per deployment multi-worker. |
 | Observability | **Placeholder/stub** | `app/observability/tracing.py` è vuoto. Restano log standard non strutturati e nessuna metrica/trace/correlation ID. |
 | Streaming REST/WebSocket richiesto | **Mancante** | Nessun endpoint WebSocket né risposta streaming è implementato. |
 | Containerizzazione operativa | **Funzionante ma non testato a fondo** | `Dockerfile` e Compose sono operativi, con health check, volume SQLite, singolo worker e configurazione per modelli su host/LAN. |
@@ -206,6 +206,7 @@ Sezioni da aggiungere o correggere prima della pubblicazione: quickstart complet
 - [ ] Applicare realmente `priority_weight` o rimuovere la promessa di priorità.
 - [ ] Rendere affidabile il risultato dei tool: fallire su tool assente/eccezione e separare attuazione da audit.
 - [ ] Sostituire `MemorySaver` con un checkpointer persistente o documentare esplicitamente il limite; preservare i thread durante la ricompilazione.
+ - [x] Sostituire `MemorySaver` con un checkpointer persistente o documentare esplicitamente il limite; preservare i thread durante la ricompilazione. (Implementazione file-backed in `app/checkpointer.py` aggiunta il 2026-09-04 — miglioramento in-process.)
 - [ ] Rendere atomica/sincronizzata la ricompilazione e definire il comportamento multi-worker.
 - [ ] Mettere auth/RBAC e allowlist davanti a tool write, override e reset; validare decisioni e comandi per device.
 - [ ] Implementare davvero timeout/fallback HITL oppure rimuovere `max_wait_seconds` dalla promessa pubblica.
@@ -217,6 +218,11 @@ Sezioni da aggiungere o correggere prima della pubblicazione: quickstart complet
 - [ ] Implementare observability o dichiararla come assente.
 - [ ] Completare quickstart/versione Python e aggiungere pin/lock; `.env.example` e `httpx` diretto sono presenti.
 - [x] Correggere README/REQUIREMENTS/HOW_TO_CUSTOMIZE per eliminare le affermazioni production-ready non supportate.
+ - [x] Creare Dockerfile e compose funzionanti con volume DB, env e health check.
+ - [ ] Implementare observability o dichiararla come assente.
+ - [ ] Completare quickstart/versione Python e aggiungere pin/lock; `.env.example` e `httpx` diretto sono presenti.
+ - [x] Correggere README/REQUIREMENTS/HOW_TO_CUSTOMIZE per eliminare le affermazioni production-ready non supportate.
+ - [x] Eseguire smoke test end-to-end con provider reale usando `.env` (OpenRouter) e script `examples/deep_hierarchy_smoke.sh` (eseguito 2026-09-04). Tests locali: `pytest` regressione -> 14 passed.
 - [ ] Aggiungere CI, policy di sicurezza/contribuzione e scansione segreti/dipendenze.
 
 ### Roadmap futura dichiarabile apertamente nel README

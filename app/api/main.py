@@ -13,6 +13,7 @@ Espone endpoint per:
 from contextlib import asynccontextmanager
 import json
 from typing import Any
+import asyncio
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -31,13 +32,16 @@ db = Database()
 registry = AgentRegistry()
 _graph = None
 _shared_tools: dict = {}
+_graph_lock = asyncio.Lock()
 
 
 async def _recompile_system_graph():
     """Ricarica le istanze dal registro e ricompila il grafo LangGraph."""
     global _graph, _shared_tools
-    agent_instances = await registry.build_agent_instances(_shared_tools)
-    _graph, _shared_tools = build_graph(custom_agent_instances=agent_instances)
+    async with _graph_lock:
+        agent_instances = await registry.build_agent_instances(_shared_tools)
+        # Compilazione e swap atomici di grafico e tool condivisi
+        _graph, _shared_tools = build_graph(custom_agent_instances=agent_instances)
 
 
 @asynccontextmanager
@@ -181,7 +185,10 @@ async def run_graph_cycle(body: RunCycleRequest):
         "hitl_required": False,
         "config": {"readings_window_hours": 4},
     }
-    result = await _graph.ainvoke(state, config=config)
+    graph = _graph
+    if graph is None:
+        raise HTTPException(status_code=500, detail="Graph not available")
+    result = await graph.ainvoke(state, config=config)
     messages = result.get("messages", [])
     return {
         "thread_id": thread_id,
@@ -195,7 +202,10 @@ async def run_graph_cycle(body: RunCycleRequest):
 async def get_graph_state(thread_id: str | None = None):
     """Restituisce lo stato attuale del grafo dal checkpointer (inclusi interrupt pendenti)."""
     config = {"configurable": {"thread_id": thread_id or _THREAD_ID}}
-    snapshot = await _graph.aget_state(config)
+    graph = _graph
+    if graph is None:
+        raise HTTPException(status_code=500, detail="Graph not available")
+    snapshot = await graph.aget_state(config)
     tasks = [
         {"id": t.id, "name": t.name, "interrupts": [str(i) for i in t.interrupts]}
         for t in snapshot.tasks
@@ -214,7 +224,10 @@ async def resume_graph(body: HitlResumeRequest):
     from langgraph.types import Command
     config = {"configurable": {"thread_id": body.thread_id or _THREAD_ID}}
     command = Command(resume={"decision": body.decision, "reasoning": body.reasoning})
-    result = await _graph.ainvoke(command, config=config)
+    graph = _graph
+    if graph is None:
+        raise HTTPException(status_code=500, detail="Graph not available")
+    result = await graph.ainvoke(command, config=config)
     messages = result.get("messages", [])
     return {
         "status": "resumed",
@@ -245,6 +258,7 @@ async def update_hitl_config(body: HitlConfigSchema):
         hitl_targets=body.hitl_targets,
         hitl_actions=body.hitl_actions,
         max_wait_seconds=body.max_wait_seconds,
+        allow_override=getattr(body, "allow_override", None),
     )
     return {"status": "updated", "config": updated}
 
@@ -326,7 +340,9 @@ async def delete_agent(agent_name: str):
 async def list_tools():
     """Elenca tutti i tool registrati e il loro valore corrente."""
     out = {}
-    for name, tool in _shared_tools.items():
+    # Snapshot per evitare race con ricompilazione
+    tools_snapshot = dict(_shared_tools)
+    for name, tool in tools_snapshot.items():
         out[name] = {
             "value": await tool.get_tool_value(),
             "unit": getattr(tool, "unit", ""),
@@ -342,7 +358,9 @@ async def get_tool_endpoint(device_id: str):
     if not tool:
         # Creazione on-demand: registra il dispositivo nel registry singleton
         tool = _get_tool(device_id, initial_value="OFF", unit="")
-        _shared_tools[device_id] = tool
+        # Protegge la modifica della mappa condivisa
+        async with _graph_lock:
+            _shared_tools[device_id] = tool
     return {"device_id": device_id, "value": await tool.get_tool_value(), "unit": getattr(tool, "unit", "")}
 
 
@@ -353,7 +371,8 @@ async def set_tool_endpoint(body: ToolWriteRequest):
     tool = _shared_tools.get(body.target)
     if not tool:
         tool = _get_tool(body.target, initial_value="OFF", unit="")
-        _shared_tools[body.target] = tool
+        async with _graph_lock:
+            _shared_tools[body.target] = tool
     await tool.set_tool_value(body.value)
     return {"device_id": body.target, "new_value": await tool.get_tool_value()}
 
@@ -437,7 +456,8 @@ async def invoke_llm(body: LlmProxyRequest):
 async def macro_health_check():
     """Invoca il check_body_status dell'Orchestratore (analisi macro trend)."""
     from app.graph.orchestrator import BrainAgent
-    brain = BrainAgent(tools=list(_shared_tools.values()))
+    tools_snapshot = dict(_shared_tools)
+    brain = BrainAgent(tools=list(tools_snapshot.values()))
     log = EventLog(target=["all"], frequency=240)
     recent_events = await log.get_recent_events()
     readings = [
@@ -477,18 +497,19 @@ async def reset_system_state():
     hitl_manager.update_config(hitl_all=False, hitl_nodes=[], hitl_targets=[], hitl_actions=[], max_wait_seconds=None)
 
     # 3. Resetta lo stato dei tool IoT condivisi
-    for name, tool in _shared_tools.items():
-        if hasattr(tool, "set_tool_value"):
-            if "lock" in name:
-                await tool.set_tool_value("LOCKED")
-            elif "alarm" in name:
-                await tool.set_tool_value("DISARMED")
-            elif "lights" in name:
-                await tool.set_tool_value("0%")
-            else:
-                await tool.set_tool_value("OFF")
+    async with _graph_lock:
+        for name, tool in _shared_tools.items():
+            if hasattr(tool, "set_tool_value"):
+                if "lock" in name:
+                    await tool.set_tool_value("LOCKED")
+                elif "alarm" in name:
+                    await tool.set_tool_value("DISARMED")
+                elif "lights" in name:
+                    await tool.set_tool_value("0%")
+                else:
+                    await tool.set_tool_value("OFF")
 
-    # 4. Ricompila la topologia del grafo
+    # 4. Ricompila la topologia del grafo (operazione protetta internamente)
     await _recompile_system_graph()
 
     return {"status": "reset_complete", "message": "Database svuotato, registro agenti resettato e grafo ricompilato."}

@@ -19,6 +19,8 @@ from app.tools.sensor_tools import get_default_iot_tools
 
 logger = logging.getLogger(__name__)
 
+from app.checkpointer import get_persistent_checkpointer
+
 
 def _resolve_registered_node(next_node: Any, registered_nodes: set[str]) -> str:
     """Risolve un nome logico nel relativo nodo registrato, senza dipendere dal casing."""
@@ -103,6 +105,13 @@ def wrap_node_with_hitl(node_name: str, agent_obj: Any):
                     f"[HITL Interceptor] OVERRIDE ricevuto per nodo '{node_name}'. "
                     f"Avvio Arbitrato Semantico MAO. Direttiva: '{reasoning}'"
                 )
+                # Rispetta la policy globale per gli OVERRIDE (possibile disabilitazione in produzione)
+                if not getattr(cfg, "allow_override", True):
+                    logger.warning(f"[HITL Interceptor] OVERRIDE ricevuto ma disabilitato dalla configurazione HITL.")
+                    return {
+                        "messages": [AIMessage(content="OVERRIDE disabilitato dalla policy HITL." )],
+                        "next_agent": "END",
+                    }
                 # Recupera i target dei conflitti pendenti (fallback per _execute_semantic_override)
                 fallback_target = "unknown"
                 fallback_action = "UNBLOCK_AND_SET"
@@ -272,8 +281,12 @@ def build_graph(custom_agent_instances: dict[str, Any] | None = None):
     for node_id in registered_nodes:
         workflow.add_conditional_edges(node_id, generic_router, routing_map)
 
-    # 5. Checkpointer per la persistenza di stato
-    checkpointer = MemorySaver()
+    # 5. Checkpointer per la persistenza di stato (usa wrapper persistente su disco)
+    try:
+        checkpointer = get_persistent_checkpointer()
+    except Exception:
+        # Fallback robusto: MemorySaver in-memory
+        checkpointer = MemorySaver()
     compiled_graph = workflow.compile(checkpointer=checkpointer)
 
     logger.info(f"Grafo LangGraph Gerarchico assemblato con {len(registered_nodes)} nodi agenti e wrapper HITL dinamici.")

@@ -23,6 +23,8 @@ class HitlConfigSchema(BaseModel):
     """Lista delle azioni specifiche che richiedono approvazione umana (es. ['FORCE_SHUTDOWN', 'UNLOCK'])."""
     max_wait_seconds: int | None = Field(default=None)
     """Attesa massima in secondi prima dell'eventuale fallback automatico."""
+    allow_override: bool = True
+    """Se False, le direttive OVERRIDE inviate dall'operatore vengono ignorate: utile per disabilitare 'God Mode' in produzione."""
 
 
 class HitlConfigManager:
@@ -45,6 +47,7 @@ class HitlConfigManager:
         hitl_targets: list[str] | None = None,
         hitl_actions: list[str] | None = None,
         max_wait_seconds: int | None = None,
+        allow_override: bool | None = None,
     ) -> HitlConfigSchema:
         if hitl_all is not None:
             self.config.hitl_all = hitl_all
@@ -56,6 +59,8 @@ class HitlConfigManager:
             self.config.hitl_actions = hitl_actions
         if max_wait_seconds is not None:
             self.config.max_wait_seconds = max_wait_seconds
+        if allow_override is not None:
+            self.config.allow_override = allow_override
 
         logger.info(
             "[HitlConfigManager] Configurazione HITL aggiornata: all=%s, nodes=%s, targets=%s, actions=%s, max_wait=%ss",

@@ -22,6 +22,18 @@ Your body does not work that way. If you put your hand on a hot plate, **you do 
 This boilerplate reproduces exactly that logic:
 
 - **The Brain (Supreme Orchestrator - Level 0)** — thinks cyclically, reviews recent history, and decides on strategic adjustments or conflict resolutions.
+ 
+Recent changes (2026-09-04): the repository now includes several safety and stability fixes exercised by the smoke tests. Notable updates included in the codebase:
+
+- Persistent in-process checkpointer (file-backed InMemorySaver) to reduce state loss on graph recompilation (`app/checkpointer.py`).
+- Atomic graph recompilation protected by an asyncio lock and safer shared-tools swapping (`app/api/main.py`).
+- `BaseAgent.apply_status()` now reports application success correctly and fails when tool actuation or DB logging fails.
+- `check_priority_lock()` uses configured `priority_weight` from the agents registry; `Brain` remains highest priority.
+- HITL `allow_override` can be disabled via API and MAO mock is available for local testing (`MAO_ENABLE_MOCK=1`).
+- A documented deep smoke test script is provided: `examples/deep_hierarchy_smoke.sh` (creates a 6-level hierarchy and exercises HITL/OVERRIDE flows).
+- Test suite and regression tests run locally; core tests were executed successfully on the audit machine.
+
+These changes improve developer ergonomics and make the demo flows more deterministic; they do not make the project production-ready (authentication, persistent DB-backed checkpointer, and RBAC are still outstanding).
 - **The Organs & Components (N-Level Sub-agents)** — specialize in macro areas or peripherals. They react autonomously within their scope and **escalate to the Parent** when the situation is ambiguous or conflicting.
 - **The Nervous System (Event Log & Audit)** — the channel through which every agent records what it did and reads recent actions to avoid conflicts or overwrites.
 
@@ -32,15 +44,15 @@ This boilerplate reproduces exactly that logic:
 A real body does not stop at “brain + organs.” When viewed closely, each organ is itself a system made of specialized substructures:
 
 ```text
-🧠 Cervello (Orchestratore centrale - Livello 0)
-   │
-   ├── 🔒 Organo Sicurezza (Livello 1)
-   │      │
-   │      └── 🔑 Componente Serratura (Livello 2)
-   │
-   └── ❤️ Organo Cardiovascolare (Livello 1)
-          │
-          └── 🫀 Componente Frequenza Cardiaca (Livello 2)
+🧠 Brain (Central Orchestrator - Level 0)
+  │
+  ├── 🔒 Security Organ (Level 1)
+  │      │
+  │      └── 🔑 Lock Component (Level 2)
+  │
+  └── ❤️ Cardiovascular Organ (Level 1)
+       │
+       └── 🫀 Heart Rate Component (Level 2)
 ```
 
 In practice, **every graph node can in turn act as a small brain for the level below it.** The same `base_agent.py`, the same `DynamicAgent`, and the same audit-log mechanism apply recursively, whether coordinating two main organs or twenty subcomponents nested across N levels.
@@ -50,29 +62,29 @@ In practice, **every graph node can in turn act as a small brain for the level b
 ## 🦾 System Anatomy
 
 ```text
-                          ┌─────────────────────┐
-                          │   🧠 CERVELLO         │
-                          │   (Orchestratore L0)  │
-                          │   Priorità: 1000.0    │
-                          └──────────┬────────────┘
-                                     │
-                    legge/scrive sul sistema nervoso
-                                     │
-                     ┌───────────────┼───────────────┐
-                     │               │               │
-              ┌──────▼─────┐  ┌──────▼─────┐  ┌──────▼──────┐
-              │ 🌡️ Clima    │  │ 🔒 Sicurezza│  │ ❤️ Cardio    │
-              │ (Organo L1) │  │ (Organo L1) │  │ (Organo L1)  │
-              └──────┬──────┘  └──────┬──────┘  └──────┬───────┘
-                     │                │                │
-              ┌──────▼──────┐  ┌──────▼──────┐  ┌──────▼───────┐
-              │ Sensori/    │  │ Componente  │  │ Componente   │
-              │ Attuatori   │  │ Serratura L2│  │ Pacemaker L2 │
-              └─────────────┘  └─────────────┘  └──────────────┘
+           ┌─────────────────────┐
+           │   🧠 BRAIN            │
+           │   (Orchestrator L0)  │
+           │   Priority: 1000.0   │
+           └──────────┬────────────┘
+            │
+          reads/writes to the nervous system
+            │
+      ┌───────────────┼───────────────┐
+      │               │               │
+    ┌──────▼─────┐  ┌──────▼─────┐  ┌──────▼──────┐
+    │ 🌡️ Climate  │  │ 🔒 Security │  │ ❤️ Cardio    │
+    │ (Organ L1)  │  │ (Organ L1)  │  │ (Organ L1)   │
+    └──────┬──────┘  └──────┬──────┘  └──────┬───────┘
+      │                │                │
+    ┌──────▼──────┐  ┌──────▼──────┐  ┌──────▼───────┐
+    │ Sensors/    │  │ Component   │  │ Component    │
+    │ Actuators   │  │ Lock L2     │  │ Pacemaker L2 │
+    └─────────────┘  └─────────────┘  └──────────────┘
 
-              ═══════════════════════════════════════════════
-                    🩸 SISTEMA NERVOSO (Event Log / DB)
-              ═══════════════════════════════════════════════
+    ═══════════════════════════════════════════════
+          🩸 NERVOUS SYSTEM (Event Log / DB)
+    ═══════════════════════════════════════════════
 ```
 
 ### The Brain (Supreme Orchestrator)
@@ -106,7 +118,7 @@ Human-approval interruptions can be inserted **dynamically anywhere in the graph
 
   {
     "decision": "OVERRIDE",
-    "reasoning": "Ignora il blocco dell'energia: mia nonna ha freddo. Accendi la stufa a 22 gradi.",
+    "reasoning": "Override the energy lock: elderly occupant needs heat. Set heater to 22°C.",
     "thread_id": "api_session"
   }
   ```
@@ -122,7 +134,7 @@ LangBrain/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
-├── test_results.json               # Esito in tempo reale della suite di test
+├── test_results.json               # Real-time result of the test suite
 ├── .env                            # Provider LLM e Prompt configurabili del Brain
 ├── .env.example                    # Template di configurazione senza segreti
 ├── app/
@@ -135,15 +147,15 @@ LangBrain/
 │   │   ├── agent_registry.py       # Registro gerarchico salvato su DB SQLite
 │   │   └── medical_agents.py       # Agenti Fisiologici (Cardiovascolare, Respiratorio)
 │   ├── graph/
-│   │   ├── orchestrator.py         # Cervello (BrainAgent - Livello 0)
-│   │   ├── builder.py              # Builder del grafo LangGraph con wrapper HITL
-│   │   ├── hitl_config.py          # Manager della configurazione dinamica HITL
-│   │   └── state.py                # GraphState condiviso
+│   │   ├── orchestrator.py         # Brain (BrainAgent - Level 0)
+│   │   ├── builder.py              # LangGraph builder with HITL wrapper
+│   │   ├── hitl_config.py          # Dynamic HITL configuration manager
+│   │   └── state.py                # Shared GraphState
 │   ├── tools/
-│   │   ├── baseTool.py             # Classe base astratta per tutti i tool IoT/Medici
-│   │   ├── sensor_tools.py         # Tool Smart Home (AC, Serratura, Allarme)
-│   │   ├── medical_tools.py        # Tool Medici (Pacemaker, Ventilatore SpO2, Normalizzatore)
-│   │   ├── event_log.py            # Sistema Nervoso: audit log eventi e sblocco TTL
+│   │   ├── baseTool.py             # Abstract base class for all IoT/Medical tools
+│   │   ├── sensor_tools.py         # Smart Home tools (AC, Lock, Alarm)
+│   │   ├── medical_tools.py        # Medical tools (Pacemaker, Ventilator SpO2, Normalizer)
+│   │   ├── event_log.py            # Nervous System: audit event log and TTL unblock
 │   │   └── tool_wrapper.py         # Tool execution logging/wrapper
 │   ├── db/
 │   │   └── database.py             # Setup SQLite (tabelle events, readings, agents_registry)
@@ -154,9 +166,9 @@ LangBrain/
 │       └── tracing.py              # Tracing e logging strutturato
 ├── examples/
 │   ├── hierarchical_pattern/
-│   │   └── demo_hierarchy.py       # Demo Gerarchia Smart Home N-Livelli
+│   │   └── demo_hierarchy.py       # Smart Home Hierarchy Demo (N-levels)
 │   └── medical_homeostasis/
-│       └── demo_medical_homeostasis.py # Demo Omeostasi Fisiologica & Risoluzione Patologie
+│       └── demo_medical_homeostasis.py # Medical homeostasis & pathology resolution demo
 ├── tests/
 │   └── test_all.py                 # Suite di test automatizzata (38 test unitari & integrati)
 └── docs/
