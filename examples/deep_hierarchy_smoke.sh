@@ -23,33 +23,6 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
-# Start server
-if [ -f "$SERVER_PID_FILE" ]; then
-  OLD_PID=$(cat "$SERVER_PID_FILE")
-  if kill -0 "$OLD_PID" >/dev/null 2>&1; then
-    echo "Server appears already running (pid=$OLD_PID). Skipping start."
-  else
-    rm -f "$SERVER_PID_FILE"
-  fi
-fi
-
-if [ ! -f "$SERVER_PID_FILE" ]; then
-  echo "[+] Starting uvicorn server in background..."
-  python3 -m uvicorn app.api.main:app --host ${HOST} --port ${PORT} --reload &> "$UVICORN_LOG" &
-  PID=$!
-  echo $PID > "$SERVER_PID_FILE"
-  echo "  -> pid=$PID"
-fi
-
-# wait for server
-echo "[+] Waiting for server to be ready on ${BASE}/"
-for i in {1..30}; do
-  if curl -sSf "${BASE}/" >/dev/null 2>&1; then
-    echo "  server is up"
-    break
-  fi
-  sleep 1
-done
 
 # Reset system DB/state via API if available
 echo "[+] Attempting system reset via ${BASE}/system/reset"
