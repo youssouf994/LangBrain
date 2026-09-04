@@ -1,6 +1,51 @@
-# Guida alla Personalizzazione: Agentic IoT Boilerplate
+# Guida alla Personalizzazione: LangBrain
 
 Questa guida spiega come estendere e personalizzare il boilerplate per adattarlo alla tua architettura IoT o a qualsiasi altro dominio gerarchico.
+
+---
+
+## 0. Installazione e Avvio del Server
+
+### Avvio locale su Windows PowerShell
+
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+python -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Configura almeno un provider LLM nel file `.env` prima di eseguire cicli che invocano gli agenti. La documentazione interattiva sarà disponibile su `http://127.0.0.1:8000/docs`.
+
+Per un modello OpenAI-compatible avviato direttamente su Windows usa, per esempio, `LOCAL_MODEL_BASE_URL=http://127.0.0.1:8080/v1`. Se LangBrain gira in Docker e il modello è sull'host Windows, imposta `LOCAL_MODEL_DOCKER_BASE_URL=http://host.docker.internal:8080/v1`; se il modello è su un'altra macchina della LAN, usa lo stesso URL LAN in entrambe le variabili. `LOCAL_MODEL` deve essere l'ID esatto restituito da `GET <base_url>/models`. Il server del modello deve essere già avviato e raggiungibile.
+
+Il timeout delle richieste LLM è `40` secondi per default. Puoi modificarlo nel `.env`, poi riavviare o ricreare il server:
+
+```dotenv
+MAO_TIMEOUT_SECONDS=40
+```
+
+### Avvio con Docker Compose
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build
+```
+
+Il servizio viene pubblicato su `http://127.0.0.1:8000` per default. Puoi cambiare la porta host impostando `LANGBRAIN_PORT` in `.env`. SQLite viene conservato nel volume Docker `langbrain_data`. Il container usa intenzionalmente un solo worker perché checkpointer, registry dei tool e configurazione HITL sono ancora in memoria di processo.
+
+Per arrestare il servizio:
+
+```powershell
+docker compose down
+```
+
+Per eliminare anche il volume SQLite, solo quando vuoi cancellare definitivamente i dati:
+
+```powershell
+docker compose down --volumes
+```
 
 ---
 
@@ -20,7 +65,7 @@ $$\text{Cervello (Brain - Livello 0)} \longrightarrow \text{Organo (Livello 1)} 
 
 ## 2. Mappatura Completa Endpoints API REST
 
-Tutti gli endpoint disponibili in FastAPI ([`app/api/main.py`](file:///home/logichole/Scrivania/IoTBoilerplate/app/api/main.py)):
+Tutti gli endpoint disponibili in FastAPI ([`app/api/main.py`](../app/api/main.py)):
 
 ### 📌 1. Sistema & Grafo Agenti
 
@@ -252,13 +297,15 @@ Tutti gli endpoint disponibili in FastAPI ([`app/api/main.py`](file:///home/logi
     "model": "deepseek/deepseek-r1:free",
     "temperature": 0.0,
     "max_tokens": 512,
-    "enable_reasoning": true
+    "enable_reasoning": true,
+    "fallback_on_error": false
   }
   ```
 - **Risposta (200):**
   ```json
   { "response": "La temperatura consigliata è tra 18°C e 20°C.", "provider": "openrouter" }
   ```
+- **Errori provider:** se nessun provider disponibile completa la richiesta, l'API restituisce `503 Service Unavailable` senza traceback ASGI. I provider cloud con chiavi mancanti/placeholder non vengono tentati. `fallback_on_error` vale `false` per default sul proxy diretto.
 
 ---
 
@@ -372,7 +419,7 @@ Quando crei o aggiorni un sotto-agente via API REST o nel file di configurazione
 
 ## 6. Configurazione Dinamica Human-in-the-Loop (HITL) e TTL
 
-Gli interrupt HITL possono essere collocati **ovunque nel flusso del grafo** tramite il wrapper universale in [`app/graph/builder.py`](file:///home/logichole/Scrivania/IoTBoilerplate/app/graph/builder.py) e gestiti dinamicamente via API senza riavviare il sistema.
+Gli interrupt HITL possono essere collocati **ovunque nel flusso del grafo** tramite il wrapper universale in [`app/graph/builder.py`](../app/graph/builder.py) e gestiti dinamicamente via API senza riavviare il sistema.
 
 ### A. Configurare i punti di Interrupt HITL ed Attesa Massima via API
 
@@ -456,7 +503,7 @@ Il sistema risponde con il log delle azioni fisicamente eseguite:
 ```
 
 > [!NOTE]
-> Il System Prompt di Arbitrato Semantico usato dal MAO è definito in [`app/graph/orchestrator.py`](file:///home/logichole/Scrivania/IoTBoilerplate/app/graph/orchestrator.py) come `_OVERRIDE_SYSTEM_PROMPT`.
+> Il System Prompt di Arbitrato Semantico usato dal MAO è definito in [`app/graph/orchestrator.py`](../app/graph/orchestrator.py) come `_OVERRIDE_SYSTEM_PROMPT`.
 > Ogni azione OVERRIDE viene auditata nel DB con `actor: "Brain_Override"` e l'azione originale (es. `UNBLOCK_AND_SET`) per tracciabilità completa.
 
 ---
@@ -474,5 +521,27 @@ Content-Type: application/json
   "reasoning": "Finestra chiusa: sblocco manuale via API"
 }
 ```
+
+---
+
+## 8. Smoke Test API Completo
+
+Gli script completi [`smoke_test_full.ps1`](../smoke_test_full.ps1) e [`smoke_test_full_v2.ps1`](../smoke_test_full_v2.ps1) verificano prima la raggiungibilità di `/v1/models`, usano UTF-8 esplicito anche per le risposte PowerShell 5.1 e configurano un interrupt HITL sul target `ac_living_room` prima del resume `OVERRIDE`. Un resume può esercitare `OVERRIDE` soltanto se lo stesso `thread_id` ha davvero un interrupt pendente.
+
+Lo smoke test API più compatto per Windows è disponibile in [`docs/API_SMOKE_TEST_WINDOWS.ps1`](API_SMOKE_TEST_WINDOWS.ps1). È presente anche la [versione Bash](API_SMOKE_TEST.md).
+
+---
+
+## 9. Contratto degli Stati e delle Azioni del Dominio
+
+Il core conserva `action`, `old_value` e `new_value` come valori estensibili e non impone una normalizzazione universale. Ogni sviluppatore che implementa un tool o un agente deve:
+
+- definire gli stati fisici ammessi dal proprio dispositivo;
+- tradurre le azioni simboliche del proprio dominio negli stati fisici corretti;
+- rifiutare valori sconosciuti prima dell'attuazione;
+- aggiungere test per transizioni valide, invalide e idempotenti;
+- decidere come risolvere flag interni quali `REJECTED` e `BLOCKED`.
+
+L'health check segnala questi flag come `MACRO_ADJUSTMENT_REQUIRED`, ma intenzionalmente non sceglie né applica un valore fisico sostitutivo.
 
 

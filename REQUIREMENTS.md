@@ -1,7 +1,9 @@
-# Progetto: Agentic IoT Boilerplate (LangGraph)
+🇮🇹 Italiano | 🇬🇧 [English](REQUIREMENTS.en.md)
+
+# Progetto: LangBrain
 
 ## Obiettivo del Prodotto
-Boilerplate LangGraph vendibile (Gumroad o simile) rivolto a dev/indie hacker generici. Dimostra un pattern di agenti gerarchici (orchestratore + sotto-agenti) pronto per produzione. Il caso d'uso concreto è IoT/Smart Home, ma l'architettura è facilmente riadattabile ad altri domini.
+Boilerplate LangGraph dimostrativo rivolto a dev/indie hacker generici. Mostra un pattern di agenti gerarchici (orchestratore + sotto-agenti), ma **non è pronto per produzione**. Il caso d'uso concreto è IoT/Smart Home e l'architettura è riadattabile ad altri domini dopo aver implementato sicurezza, persistenza e contratti specifici del dominio.
 
 ## Stack Tecnologico
 - **Framework Agenti**: LangGraph
@@ -46,6 +48,14 @@ I cicli del grafo inviati tramite `POST /graph/run` accettano un `thread_id` uni
 ### Tool On-Demand
 I dispositivi non pre-registrati vengono creati automaticamente come `IoTDeviceTool` con stato `OFF` al primo accesso tramite `GET/POST /tools/{device_id}` o durante l'esecuzione di un Override semantico.
 
+### Timeout MAO e contratti di dominio
+
+- Il MAO usa client asincroni e un timeout HTTP configurato da `MAO_TIMEOUT_SECONDS` (default: `40` secondi).
+- `LOCAL_MODEL_BASE_URL` configura l'accesso locale; `LOCAL_MODEL_DOCKER_BASE_URL` configura l'endpoint visto dal container. Su una macchina LAN possono coincidere.
+- `LOCAL_MODEL` deve corrispondere esattamente a un ID restituito dall'endpoint OpenAI-compatible `/v1/models`.
+- La semantica e la normalizzazione di `action`, `old_value` e `new_value` sono contratti del dominio applicativo. Ogni sviluppatore deve validare i valori ammessi nel proprio tool/agente; il core non converte automaticamente azioni simboliche in stati fisici.
+- L'health check segnala flag di controllo (`REJECTED`, `BLOCKED`, ecc.) come `MACRO_ADJUSTMENT_REQUIRED`, senza scegliere uno stato fisico sostitutivo.
+
 ## Modelli Dati & DB
 
 ### DB Schema (SQLite)
@@ -64,12 +74,14 @@ I dispositivi non pre-registrati vengono creati automaticamente come `IoTDeviceT
 ## Struttura del Progetto
 
 ```text
-IoTBoilerplate/
+LangBrain/
 ├── REQUIREMENTS.md
+├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
 ├── test_results.json               # Esito in tempo reale della suite di test
 ├── .env                            # Provider LLM e Prompt configurabili del Brain
+├── .env.example                    # Template di configurazione senza segreti
 ├── app/
 │   ├── MAO/
 │   │   └── model_access_object.py  # Mao (Model Access Object per LLM locale/OpenAI API)

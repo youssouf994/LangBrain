@@ -6,4 +6,5 @@ uvicorn[standard]>=0.28.0
 pydantic>=2.6.0
 aiosqlite>=0.20.0
 python-dotenv>=1.0.0
+httpx>=0.27.0
 openai

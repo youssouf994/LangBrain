@@ -4,6 +4,7 @@ from typing import Any
 from langchain_core.messages import AIMessage
 
 from app.agents.base_agent import BaseAgent
+from app.core.constants import is_control_flag
 from app.graph.state import GraphState
 from app.tools.baseTool import BaseTool
 from app.tools.sensor_tools import get_default_iot_tools, get_tool
@@ -89,7 +90,12 @@ class BrainAgent(BaseAgent):
     Possiede i privilegi massimi, esegue il readout iniziale dei tool e gestisce le escalation.
     """
 
-    def __init__(self, tools: list[BaseTool] | None = None):
+    def __init__(
+        self,
+        tools: list[BaseTool] | None = None,
+        sub_agent_names: list[str] | None = None,
+        registered_agent_names: list[str] | None = None,
+    ):
         super().__init__(
             name="Brain", 
             managed_targets=["all"], 
@@ -100,6 +106,14 @@ class BrainAgent(BaseAgent):
             self.tools: dict[str, BaseTool] = {tool.target_device: tool for tool in tools}
         else:
             self.tools = get_default_iot_tools()
+        # Se il Brain viene usato direttamente, conserva il comportamento storico.
+        # Il builder passa invece l'elenco effettivo (anche vuoto) dei nodi radice.
+        self.sub_agent_names = list(sub_agent_names) if sub_agent_names is not None else ["agent_climate"]
+        self.registered_agent_names = (
+            list(registered_agent_names)
+            if registered_agent_names is not None
+            else list(self.sub_agent_names)
+        )
 
         # Prompt configurabili da .env
         import os
@@ -245,7 +259,7 @@ class BrainAgent(BaseAgent):
                     else:
                         decision_response = f"DECISIONE: RESPINGI\nMOTIVAZIONE: {decision_reason}"
                 else:
-                    decision_response = self.ask_brain(system_prompt, user_prompt, temperature=0.0, max_tokens=2048)
+                    decision_response = await self.ask_brain(system_prompt, user_prompt, temperature=0.0, max_tokens=2048)
 
                 logger.info(f"[{self.name}] Risoluzione (AI/HITL) per {target}: {decision_response}")
 
@@ -281,13 +295,26 @@ class BrainAgent(BaseAgent):
 
         # --- CASO 2: Avvio da START (Padre che smista verso il sotto-agente) ---
         target_agent = state.get("next_agent", "END")
-        if target_agent != "END" and target_agent != "brain":
-            logger.info(f"[{self.name}] Status check ok. Smistamento verso sotto-agente '{target_agent}'...")
-            updates["next_agent"] = target_agent
-        elif target_agent == "brain":
-            # Se la richiesta parte da brain, delega al primo sotto-agente o ad agent_climate
-            first_sub = next((k for k in self.tools.keys() if k != "all"), "agent_climate")
-            updates["next_agent"] = state.get("config", {}).get("default_sub_agent", "agent_climate")
+        target_agent_key = str(target_agent).casefold()
+        registered_by_key = {name.casefold(): name for name in self.registered_agent_names}
+        root_agents_by_key = {name.casefold(): name for name in self.sub_agent_names}
+        if target_agent_key != "end" and target_agent_key != "brain":
+            registered_target = registered_by_key.get(target_agent_key)
+            if registered_target:
+                logger.info(f"[{self.name}] Status check ok. Smistamento verso sotto-agente '{registered_target}'...")
+                updates["next_agent"] = registered_target
+            else:
+                logger.warning(f"[{self.name}] Agente richiesto '{target_agent}' non registrato. Chiusura ciclo.")
+                updates["next_agent"] = "END"
+        elif target_agent_key == "brain":
+            runtime_config = state.get("config", {})
+            if runtime_config.get("_hierarchy_visited"):
+                # Un agente radice ha terminato ed è risalito al Brain: il ciclo è completo.
+                updates["next_agent"] = "END"
+            else:
+                configured_default = runtime_config.get("default_sub_agent")
+                selected = root_agents_by_key.get(str(configured_default).casefold()) if configured_default else None
+                updates["next_agent"] = selected or (self.sub_agent_names[0] if self.sub_agent_names else "END")
         else:
             updates["next_agent"] = "END"
 
@@ -314,7 +341,7 @@ class BrainAgent(BaseAgent):
 
         raw_response = ""
         try:
-            raw_response = self.ask_brain(
+            raw_response = await self.ask_brain(
                 _OVERRIDE_SYSTEM_PROMPT.format(tool_catalog=_tool_value_catalog(self.tools)),
                 override_prompt,
                 temperature=0.0,
@@ -385,6 +412,25 @@ class BrainAgent(BaseAgent):
         """
         logger.info(f"[{self.name}] Esecuzione check_body_status (Analisi Macro Trend)...")
 
+        flagged_readings = [
+            reading
+            for reading in relevant_readings
+            if is_control_flag(reading.get("value"))
+        ]
+        if flagged_readings:
+            flagged_targets = ", ".join(
+                f"{reading.get('sensor_id', 'unknown')}={reading.get('value')}"
+                for reading in flagged_readings
+            )
+            macro_response = (
+                "STATUS: MACRO_ADJUSTMENT_REQUIRED\n"
+                f"DETTAGLI: flag di controllo presenti ({flagged_targets}); "
+                "la risoluzione fisica deve essere implementata dal dominio applicativo."
+            )
+            return {
+                "messages": [AIMessage(content=f"[{self.name}] Macro Check Completato: {macro_response}")]
+            }
+
         system_prompt = (
             "Sei l'Orchestratore Supremo. Stai eseguendo il controllo di routine dello stato globale della casa. "
             "Esamina le letture reali e gli eventi recenti. "
@@ -400,7 +446,7 @@ class BrainAgent(BaseAgent):
             "Valuta la situazione macro dell'abitazione."
         )
 
-        macro_response = self.ask_brain(system_prompt, user_prompt, temperature=0.1, max_tokens=2048)
+        macro_response = await self.ask_brain(system_prompt, user_prompt, temperature=0.1, max_tokens=2048)
         logger.info(f"[{self.name}] Risultato check_body_status: {macro_response}")
 
         if "MACRO_ADJUSTMENT_REQUIRED" in macro_response.upper():

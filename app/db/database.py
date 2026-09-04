@@ -4,7 +4,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.getenv("DB_PATH", "iot.boilerplate.db")
+DB_PATH = os.getenv("DB_PATH", "langbrain.db")
 
 class Database:
     def __init__(self, db_path: str = DB_PATH):

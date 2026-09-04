@@ -30,9 +30,13 @@ class BaseAgent(ABC):
 
         # 1. Recupera le escalation aperte relative ai target gestiti
         pending_escalations = state.get("pending_escalations", [])
+        accepts_all_targets = "all" in self.managed_targets
+        child_agent_names = set(getattr(self, "sub_agent_names", []))
         agent_escalations = [
             esc for esc in pending_escalations 
-            if esc.get("target_device") in self.managed_targets
+            if accepts_all_targets
+            or esc.get("target_device") in self.managed_targets
+            or esc.get("source_agent") in child_agent_names
         ]
 
         # 2. Recupera gli eventi recenti dal DB per i target gestiti (ultimi N minuti)
@@ -208,7 +212,7 @@ class BaseAgent(ABC):
         )
         return item.model_dump()
 
-    def ask_brain(
+    async def ask_brain(
         self,
         system_prompt: str,
         user_prompt: str,
@@ -221,7 +225,7 @@ class BaseAgent(ABC):
         Invocazione centralizzata del modello tramite MAO.
         """
         try:
-            return self.mao.call_model(
+            return await self.mao.call_model(
                 system_prompt, user_prompt, temperature, max_tokens, provider=provider, model=model
             )
         except Exception as e:

@@ -72,6 +72,11 @@ class DynamicAgent(BaseAgent):
         )
         self.tools = tools or get_default_iot_tools()
 
+    def _parent_route(self) -> str:
+        """Restituisce il nome canonico del nodo padre noto al grafo."""
+        parent = self.parent_agent_name or "END"
+        return "brain" if parent.casefold() == "brain" else parent
+
     async def process(
         self,
         state: GraphState,
@@ -81,10 +86,34 @@ class DynamicAgent(BaseAgent):
     ) -> dict[str, Any]:
         logger.info(f"[{self.name}] [Livello {self.level}] Esecuzione analisi dinamica...")
 
-        # Se non ha target diretti, delega al primo sotto-agente se presente
+        runtime_config = dict(state.get("config", {}))
+        visited_agents = list(runtime_config.get("_hierarchy_visited", []))
+        if self.name not in visited_agents:
+            visited_agents.append(self.name)
+        runtime_config["_hierarchy_visited"] = visited_agents
+
+        # Le escalation ricevute da un figlio risalgono di un livello. La coda è
+        # già nello stato condiviso: non viene riaggiunta, evitando duplicazioni.
+        if agent_escalations:
+            return {
+                "next_agent": self._parent_route(),
+                "config": runtime_config,
+                "messages": [AIMessage(content=f"[{self.name}] Escalation del sotto-agente inoltrata a {self.parent_agent_name}.")],
+            }
+
+        # Visita i sotto-agenti configurati una volta per ciclo, anche quando
+        # l'organo possiede target diretti. Al ritorno, l'organo prosegue la sua analisi.
+        next_child = next((child for child in self.sub_agent_names if child not in visited_agents), None)
+        if next_child:
+            return {
+                "next_agent": next_child,
+                "config": runtime_config,
+                "messages": [AIMessage(content=f"[{self.name}] Delega analisi al sotto-agente {next_child}.")],
+            }
+
+        # Se non ha target diretti e i figli sono stati visitati, risale al padre.
         if not self.managed_targets:
-            next_target = self.sub_agent_names[0] if self.sub_agent_names else (self.parent_agent_name or "END")
-            return {"next_agent": next_target}
+            return {"next_agent": self._parent_route(), "config": runtime_config}
 
         primary_target = self.managed_targets[0]
         tool_obj = self.tools.get(primary_target)
@@ -101,7 +130,8 @@ class DynamicAgent(BaseAgent):
         if is_control_flag(current_status):
             logger.info(f"[{self.name}] Target '{primary_target}' in stato di blocco '{current_status}'. In attesa sblocco.")
             return {
-                "next_agent": self.parent_agent_name or "END",
+                "next_agent": self._parent_route(),
+                "config": runtime_config,
                 "messages": [AIMessage(content=f"[{self.name}] {primary_target} in blocco ({current_status}). In attesa.")],
             }
 
@@ -134,11 +164,12 @@ class DynamicAgent(BaseAgent):
             recent_events=recent_events,
         )
 
-        ai_response = self.ask_brain(self.system_prompt_template, user_prompt, temperature=0.0, max_tokens=2048)
+        ai_response = await self.ask_brain(self.system_prompt_template, user_prompt, temperature=0.0, max_tokens=2048)
         ai_response_str = ai_response.strip().upper()
         logger.info(f"[{self.name}] Risposta AI: {ai_response_str}")
 
         update: dict[str, Any] = {}
+        update["config"] = runtime_config
 
         # 5. Gestione decisione ed Escalation verso il Padre
         if (has_conflict and not recently_reconciled) or ("DECISIONE: ESCALATE" in ai_response_str):
@@ -164,7 +195,7 @@ class DynamicAgent(BaseAgent):
             )
 
             update["pending_escalations"] = [escalation]
-            update["next_agent"] = self.parent_agent_name or "brain"
+            update["next_agent"] = self._parent_route()
             update["messages"] = [AIMessage(content=f"[{self.name}] Conflitto rilevato. Escalation inviata a {self.parent_agent_name} per {primary_target}.")]
 
         elif "DECISIONE: ACTION" in ai_response_str and not has_conflict:
@@ -179,7 +210,7 @@ class DynamicAgent(BaseAgent):
             )
             if applied:
                 update["messages"] = [AIMessage(content=f"[{self.name}] Azione eseguita su {primary_target} (applied=True).")]
-                update["next_agent"] = self.parent_agent_name or "END"
+                update["next_agent"] = self._parent_route()
             else:
                 # Azione bloccata per priorità: genera escalation verso il Padre
                 reason = f"Azione su {primary_target} bloccata da vincolo di priorità per {self.name}"
@@ -191,11 +222,11 @@ class DynamicAgent(BaseAgent):
                     context_events=[],
                 )
                 update["pending_escalations"] = [escalation]
-                update["next_agent"] = self.parent_agent_name or "brain"
+                update["next_agent"] = self._parent_route()
                 update["messages"] = [AIMessage(content=f"[{self.name}] Azione su {primary_target} bloccata per priorità. Escalation inviata a {self.parent_agent_name}.")]
         else:
             logger.info(f"[{self.name}] Nessuna azione richiesta.")
-            update["next_agent"] = self.parent_agent_name or "END"
+            update["next_agent"] = self._parent_route()
             update["messages"] = [AIMessage(content=f"[{self.name}] Nessuna azione necessaria.")]
 
         return update

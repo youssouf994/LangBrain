@@ -1,5 +1,5 @@
 """
-API FastAPI — IoT Agentic Boilerplate
+API FastAPI — LangBrain
 Espone endpoint per:
   - Invocare il grafo agenti (singolo ciclo)
   - Leggere/scrivere tool IoT
@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Agentic IoT Boilerplate API",
+    title="LangBrain API",
     description="API FastAPI con LangGraph per la gestione gerarchica N-livelli (Cervello -> Organi -> Componenti)",
     version="2.1.0",
     lifespan=lifespan,
@@ -96,6 +96,7 @@ class LlmProxyRequest(BaseModel):
     temperature: float = 0.0
     max_tokens: int = 2048
     enable_reasoning: bool = False
+    fallback_on_error: bool = False
 
 
 class CreateSubAgentSchema(BaseModel):
@@ -412,16 +413,22 @@ async def invoke_llm(body: LlmProxyRequest):
     """Chiama direttamente il MAO con system/user prompt e provider a scelta."""
     from app.MAO.model_access_object import Mao
     mao = Mao()
-    response = mao.call_model(
-        system_prompt=body.system_prompt,
-        user_prompt=body.user_prompt,
-        provider=body.provider,
-        model=body.model,
-        temperature=body.temperature,
-        max_tokens=body.max_tokens,
-        enable_reasoning=body.enable_reasoning,
-    )
-    return {"response": response, "provider": body.provider or mao.default_provider}
+    try:
+        response = await mao.call_model(
+            system_prompt=body.system_prompt,
+            user_prompt=body.user_prompt,
+            provider=body.provider,
+            model=body.model,
+            temperature=body.temperature,
+            max_tokens=body.max_tokens,
+            fallback_on_error=body.fallback_on_error,
+            enable_reasoning=body.enable_reasoning,
+        )
+        return {"response": response, "provider": body.provider or mao.default_provider}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    finally:
+        await mao.aclose()
 
 
 # --- Health Check Macro (check_body_status) ---

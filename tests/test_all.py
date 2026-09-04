@@ -1,5 +1,5 @@
 """
-Test suite completa — IoT Agentic Boilerplate
+Test suite completa — LangBrain
 Risultati scritti in: test_results.json
 """
 
@@ -166,7 +166,7 @@ except Exception as e:
 try:
     assert mao is not None
     try:
-        _, ms = timed_sync(mao.call_model, "Rispondi solo con OK.", "Test connessione.", max_tokens=10)
+        _, ms = run(timed_async(mao.call_model("Rispondi solo con OK.", "Test connessione.", max_tokens=10)))
         record("mao.call_model_live", True, duration_ms=ms)
     except Exception as ex:
         # Se i provider esterni falliscono per mancanza di crediti o connettività, valida che il fallback gestisca l'eccezione
@@ -178,7 +178,7 @@ try:
     assert mao is not None
     raised = False
     try:
-        mao.call_model("s", "u", provider="nonexistent_xyz", fallback_on_error=False)
+        run(mao.call_model("s", "u", provider="nonexistent_xyz", fallback_on_error=False))
     except Exception:
         raised = True
     record("mao.unknown_provider_raises", raised, "" if raised else "nessuna eccezione")
@@ -196,7 +196,7 @@ try:
         mock_response.choices[0].message.content = "test"
         with patch.object(mao.providers["openrouter"]["client"].chat.completions, "create",
                           return_value=mock_response):
-            result = mao.call_model("sys", "usr", enable_reasoning=True, provider="openrouter")
+            result = await mao.call_model("sys", "usr", enable_reasoning=True, provider="openrouter")
         assert result == "test"
         return True
 
@@ -795,7 +795,7 @@ try:
             "config": {},
         }
         res_c = await cardio(state_cardio)
-        assert res_c["next_agent"] == "Brain"  # Escalation per aritmia severa (|Z| > 1.5)
+        assert res_c["next_agent"] == "brain"  # Nome canonico del nodo Brain nel grafo
 
         # Invocazione RespiratoryOrganAgent
         state_resp = {

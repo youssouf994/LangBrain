@@ -61,7 +61,7 @@ class CardiovascularOrganAgent(BaseAgent):
                     escalated=True,
                 )
                 return {
-                    "next_agent": "Brain",
+                    "next_agent": "brain",
                     "pending_escalations": [escalation],
                     "messages": [AIMessage(content=f"[{self.name}] Escalation inviata al Cervello per Tachicardia Severa ({norm_result['raw_value']} BPM).")],
                 }

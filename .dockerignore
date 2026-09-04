@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+.venv
+venv
+__pycache__
+*.py[cod]
+*.db
+*.sqlite3
+.pytest_cache
+test_results.json
+docs/PROJECT_STATUS.md

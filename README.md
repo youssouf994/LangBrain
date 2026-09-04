@@ -1,8 +1,13 @@
-# 🤖 Agentic IoT Boilerplate (bodyAgent)
+🇮🇹 Italiano | 🇬🇧 [English](README.en.md)
+
+# 🤖 LangBrain
+
+> [!WARNING]
+> **LangBrain non è pronto per l'uso in produzione.** È un prototipo/boilerplate dimostrativo: prima di usarlo in ambienti reali occorre completare gli interventi di sicurezza, persistenza, concorrenza, deployment, observability e testing elencati in [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md).
 
 **Un corpo digitale per i tuoi progetti di automazione intelligente ed agenti gerarchici.**
 
-Un boilerplate LangGraph pronto per produzione che implementa un pattern di agenti gerarchici ispirato al modo in cui funziona un organismo: un **cervello** (Orchestratore Supremo) che pensa in modo ponderato e concilia i conflitti, e **organi/componenti** (sotto-agenti a N-livelli) che reagiscono in tempo reale, agendo in autonomia quando serve ed escalando ai livelli superiori solo quando la situazione lo richiede.
+Un boilerplate LangGraph sperimentale che implementa un pattern di agenti gerarchici ispirato al modo in cui funziona un organismo: un **cervello** (Orchestratore Supremo) che pensa in modo ponderato e concilia i conflitti, e **organi/componenti** (sotto-agenti a N-livelli) che reagiscono in tempo reale, agendo in autonomia quando serve ed escalando ai livelli superiori solo quando la situazione lo richiede.
 
 Il caso d'uso dimostrativo principale è una **smart home**, affiancato da una demo avanzata di **omeostasi medica e fisiologica**, ma l'architettura è pensata per essere trapiantata in qualsiasi dominio — customer support, monitoraggio industriale, gestione flotte, e molto altro.
 
@@ -110,12 +115,14 @@ L'interruzione per approvazione umana può essere inserita **dinamicamente ovunq
 ## 🗂️ Struttura del Progetto
 
 ```text
-IoTBoilerplate/
+LangBrain/
 ├── REQUIREMENTS.md
+├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
 ├── test_results.json               # Esito in tempo reale della suite di test
 ├── .env                            # Provider LLM e Prompt configurabili del Brain
+├── .env.example                    # Template di configurazione senza segreti
 ├── app/
 │   ├── MAO/
 │   │   └── model_access_object.py  # Model Access Object (OpenRouter, Gemini, LLM Locale)
@@ -167,6 +174,16 @@ IoTBoilerplate/
 
 ---
 
+## ⚙️ Configurazione MAO e contratti di dominio
+
+Le chiamate LLM sono asincrone. Il timeout HTTP del MAO è configurato da `MAO_TIMEOUT_SECONDS` e vale **40 secondi** se la variabile non è presente o non è valida. Per un modello su un'altra macchina della LAN, imposta sia `LOCAL_MODEL_BASE_URL` sia `LOCAL_MODEL_DOCKER_BASE_URL` sull'endpoint OpenAI-compatible raggiungibile (per esempio `http://172.16.77.153:8080/v1`) e usa in `LOCAL_MODEL` l'ID restituito da `GET /v1/models`.
+
+LangBrain tratta `action`, `old_value` e `new_value` come dati estensibili. Il boilerplate non può conoscere gli stati fisici validi di ogni dominio: chi aggiunge un tool o agente deve implementare e testare la propria validazione/mappatura (per esempio `LOCKED`/`UNLOCKED` per una serratura). I flag interni come `REJECTED` e `BLOCKED` vengono segnalati dall'health check, ma non trasformati automaticamente in uno stato fisico.
+
+Gli smoke test `smoke_test_full.ps1` e `smoke_test_full_v2.ps1` verificano prima `/v1/models`, configurano un vero interrupt sul target dell'override e usano decodifica UTF-8 esplicita su Windows PowerShell 5.1.
+
+---
+
 ## 🚀 Esempi Dimostrativi Inclusi
 
 1. **Gerarchia Smart Home (`examples/hierarchical_pattern/demo_hierarchy.py`):**
@@ -185,10 +202,18 @@ IoTBoilerplate/
 
 ## 🧪 Esecuzione della Suite di Test
 
-Per eseguire tutti i 38 test automatizzati e riaggiornare `test_results.json`:
+Per eseguire la suite legacy custom e aggiornare `test_results.json`:
 ```bash
 python3 tests/test_all.py
 ```
+
+Per eseguire i test di regressione asincroni standard:
+
+```bash
+python -m unittest tests.test_blocking_regressions -v
+```
+
+Per il test end-to-end con modello locale usa `smoke_test_full_v2.ps1`. Per una verifica API compatta usa lo [smoke test PowerShell per Windows](docs/API_SMOKE_TEST_WINDOWS.ps1); è disponibile anche la [versione Bash](docs/API_SMOKE_TEST.md).
 
 ---
 

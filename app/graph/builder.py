@@ -20,6 +20,22 @@ from app.tools.sensor_tools import get_default_iot_tools
 logger = logging.getLogger(__name__)
 
 
+def _resolve_registered_node(next_node: Any, registered_nodes: set[str]) -> str:
+    """Risolve un nome logico nel relativo nodo registrato, senza dipendere dal casing."""
+    candidate = str(next_node or "END")
+    if candidate == END or candidate.upper() == "END":
+        return END
+    if candidate in registered_nodes:
+        return candidate
+
+    matches = [node for node in registered_nodes if node.casefold() == candidate.casefold()]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        logger.error("Routing ambiguo per '%s': nodi compatibili %s", candidate, matches)
+    return END
+
+
 def wrap_node_with_hitl(node_name: str, agent_obj: Any):
     """
     Wrapper universale che consente di attivare un interrupt HITL (Human-in-the-Loop)
@@ -157,13 +173,15 @@ def wrap_node_with_hitl(node_name: str, agent_obj: Any):
                     }
 
         # 2. Esecuzione dell'agente reale
-        if callable(getattr(agent_obj, "process", None)):
+        # Gli agenti BaseAgent sono callable: passare da __call__ è essenziale perché
+        # lì vengono caricati dal DB gli eventi recenti e filtrate letture/escalation.
+        if callable(agent_obj):
+            res = await agent_obj(state)
+        elif callable(getattr(agent_obj, "process", None)):
             recent_events = state.get("recent_events", [])
             relevant_readings = state.get("readings", [])
             agent_escalations = state.get("pending_escalations", [])
             res = await agent_obj.process(state, recent_events, relevant_readings, agent_escalations)
-        elif callable(agent_obj):
-            res = await agent_obj(state)
         else:
             res = {}
 
@@ -211,7 +229,23 @@ def build_graph(custom_agent_instances: dict[str, Any] | None = None):
     e wrapper per la gestione dinamica degli Interrupt HITL.
     """
     shared_tools = get_default_iot_tools()
-    brain_agent = BrainAgent(tools=list(shared_tools.values()))
+
+    if custom_agent_instances is None:
+        climate_agent = ClimateAgent(tools=shared_tools)
+        agent_instances: dict[str, Any] = {"agent_climate": climate_agent}
+    else:
+        agent_instances = custom_agent_instances
+
+    root_agent_names = [
+        name
+        for name, agent in agent_instances.items()
+        if str(getattr(agent, "parent_agent_name", "Brain") or "Brain").casefold() == "brain"
+    ]
+    brain_agent = BrainAgent(
+        tools=list(shared_tools.values()),
+        sub_agent_names=root_agent_names,
+        registered_agent_names=list(agent_instances),
+    )
 
     workflow = StateGraph(GraphState)
 
@@ -220,14 +254,9 @@ def build_graph(custom_agent_instances: dict[str, Any] | None = None):
     registered_nodes = {"brain"}
 
     # 2. Registra tutti i sotto-agenti avvolti con HITL Interceptor
-    if custom_agent_instances:
-        for node_name, agent_obj in custom_agent_instances.items():
-            workflow.add_node(node_name, wrap_node_with_hitl(node_name, agent_obj))
-            registered_nodes.add(node_name)
-    else:
-        climate_agent = ClimateAgent(tools=shared_tools)
-        workflow.add_node("agent_climate", wrap_node_with_hitl("agent_climate", climate_agent))
-        registered_nodes.add("agent_climate")
+    for node_name, agent_obj in agent_instances.items():
+        workflow.add_node(node_name, wrap_node_with_hitl(node_name, agent_obj))
+        registered_nodes.add(node_name)
 
     # 3. Flusso iniziale: START -> Brain
     workflow.add_edge(START, "brain")
@@ -235,9 +264,7 @@ def build_graph(custom_agent_instances: dict[str, Any] | None = None):
     # 4. Router universale
     def generic_router(state: GraphState) -> str:
         next_node = state.get("next_agent", "END")
-        if next_node in registered_nodes:
-            return next_node
-        return END
+        return _resolve_registered_node(next_node, registered_nodes)
 
     routing_map = {node_id: node_id for node_id in registered_nodes}
     routing_map[END] = END

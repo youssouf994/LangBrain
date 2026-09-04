@@ -117,7 +117,7 @@ class ClimateAgent(BaseAgent):
             "Qual e' la decisione corretta?"
         )
 
-        ai_response = self.ask_brain(system_prompt, user_prompt, temperature=0.0, max_tokens=2048)
+        ai_response = await self.ask_brain(system_prompt, user_prompt, temperature=0.0, max_tokens=2048)
         ai_response_str = ai_response.strip().upper()
         logger.info(f"[{self.name}] Risposta AI: {ai_response_str}")
 

@@ -3,5 +3,32 @@ venv/
 *.sqlite3
 *.db
 __pycache__/
-.pytest_cache/
 test_results.json
+PROJECT_STATUS.md
+
+# Python artifacts
+*.py[cod]
+*.pyd
+.venv/
+build/
+dist/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# Test and coverage output
+.coverage
+.coverage.*
+htmlcov/
+
+# Local tooling and logs
+.pytest_cache/
+.vscode/
+.idea/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini

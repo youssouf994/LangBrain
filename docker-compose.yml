@@ -1,0 +1,47 @@
+services:
+  langbrain:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: langbrain:local
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${LANGBRAIN_PORT:-8000}:8000"
+    environment:
+      DB_PATH: /data/langbrain.db
+      FLAG_TTL_MINUTES: "${FLAG_TTL_MINUTES:-60}"
+      MAO_TIMEOUT_SECONDS: "${MAO_TIMEOUT_SECONDS:-40}"
+      DEFAULT_PROVIDER: "${DEFAULT_PROVIDER:-google_studio}"
+      GOOGLE_BASE_URL: "${GOOGLE_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-nessuna}"
+      GEMINI_MODEL: "${GEMINI_MODEL:-gemini-3.5-flash}"
+      OPENROUTER_BASE_URL: "${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-nessuna}"
+      OPENROUTER_MODEL: "${OPENROUTER_MODEL:-openrouter/auto}"
+      OPENROUTER_REFERER: "${OPENROUTER_REFERER:-https://github.com/youssouf994/LangBrain}"
+      OPENROUTER_APP_TITLE: "${OPENROUTER_APP_TITLE:-LangBrain}"
+      # Dentro Docker, 127.0.0.1 indica il container: per raggiungere il modello
+      # avviato su Windows serve host.docker.internal.
+      LOCAL_MODEL_BASE_URL: "${LOCAL_MODEL_DOCKER_BASE_URL:-http://host.docker.internal:8080/v1}"
+      LOCAL_API_KEY: "${LOCAL_API_KEY:-nessuna}"
+      LOCAL_MODEL: "${LOCAL_MODEL:-local-model}"
+      BRAIN_SYSTEM_PROMPT: "${BRAIN_SYSTEM_PROMPT:-}"
+      BRAIN_USER_PROMPT_TEMPLATE: "${BRAIN_USER_PROMPT_TEMPLATE:-}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - langbrain_data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3).read()"
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  langbrain_data:
