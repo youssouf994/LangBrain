@@ -19,7 +19,9 @@ def intestazione(chiave):
 
 
 def percorso_di_prova(template):
-    return template.replace("{device_id}", "x").replace("{agent_name}", "x").replace("{target}", "x")
+    percorso = template.replace("{device_id}", "x").replace("{agent_name}", "x").replace("{target}", "x").replace("{entita_id}", "x")
+    # Lo stream della simulazione non finisce da solo: nei test si chiude dopo il primo messaggio.
+    return percorso + "?limite=1" if percorso == "/energia/stream" else percorso
 
 
 class MatriceDeiPermessiTest(unittest.TestCase):

@@ -104,11 +104,19 @@ class BrainAgent(BaseAgent):
         tools: list[BaseTool] | None = None,
         sub_agent_names: list[str] | None = None,
         registered_agent_names: list[str] | None = None,
+        managed_targets: list[str] | None = None,
+        system_prompt: str | None = None,
+        user_prompt_template: str | None = None,
     ):
+        """
+        `managed_targets` limita il Brain ai dispositivi del proprio dominio (eventi e conflitti di altri domini nello
+        stesso database vengono ignorati); senza, il Brain vede tutto ("all"). `system_prompt` e `user_prompt_template`
+        sostituiscono i prompt predefiniti e quelli del .env (BRAIN_SYSTEM_PROMPT, BRAIN_USER_PROMPT_TEMPLATE).
+        """
         super().__init__(
-            name="Brain", 
-            managed_targets=["all"], 
-            conflict_window_minutes=240, 
+            name="Brain",
+            managed_targets=list(managed_targets) if managed_targets else ["all"],
+            conflict_window_minutes=240,
             priority_weight=1000.0
         )
         if tools:
@@ -128,7 +136,8 @@ class BrainAgent(BaseAgent):
         import os
         self.tool_value_catalog = _tool_value_catalog(self.tools)
         self.system_prompt = (
-            os.getenv("BRAIN_SYSTEM_PROMPT")
+            system_prompt
+            or os.getenv("BRAIN_SYSTEM_PROMPT")
             or (
                 "Sei l'Orchestratore Supremo della Smart Home. "
                 "Hai ricevuto un'escalation da un sotto-agente per un conflitto o un'anomalia. "
@@ -143,7 +152,8 @@ class BrainAgent(BaseAgent):
             )
         )
         self.user_prompt_template = (
-            os.getenv("BRAIN_USER_PROMPT_TEMPLATE")
+            user_prompt_template
+            or os.getenv("BRAIN_USER_PROMPT_TEMPLATE")
             or (
                 "Agente Richiedente: {source}\n"
                 "Dispositivo Target: {target}\n"
@@ -361,9 +371,11 @@ class BrainAgent(BaseAgent):
                 updates["next_agent"] = "brain"
                 return updates
 
-            # Svuota le escalation e chiude il ciclo
+            # Svuota le escalation; se restano organi radice da visitare in questo ciclo si prosegue, altrimenti fine.
             updates["pending_escalations"] = []
-            updates["next_agent"] = "END"
+            visitati = {str(v).casefold() for v in state.get("config", {}).get("_hierarchy_visited", [])}
+            prossima = next((r for r in self.sub_agent_names if visitati and r.casefold() not in visitati), None)
+            updates["next_agent"] = prossima or "END"
             return updates
 
         # --- CASO 2: Avvio da START (Padre che smista verso il sotto-agente) ---
@@ -381,9 +393,13 @@ class BrainAgent(BaseAgent):
                 updates["next_agent"] = "END"
         elif target_agent_key == "brain":
             runtime_config = state.get("config", {})
-            if runtime_config.get("_hierarchy_visited"):
-                # Un agente radice ha terminato ed è risalito al Brain: il ciclo è completo.
-                updates["next_agent"] = "END"
+            visitati = runtime_config.get("_hierarchy_visited")
+            if visitati:
+                # Un agente radice ha terminato ed è risalito al Brain: si passa alla radice successiva non ancora
+                # visitata; quando le ha visitate tutte il ciclo è completo.
+                visitati_chiavi = {str(v).casefold() for v in visitati}
+                prossima = next((r for r in self.sub_agent_names if r.casefold() not in visitati_chiavi), None)
+                updates["next_agent"] = prossima or "END"
             else:
                 configured_default = runtime_config.get("default_sub_agent")
                 selected = root_agents_by_key.get(str(configured_default).casefold()) if configured_default else None
@@ -397,13 +413,14 @@ class BrainAgent(BaseAgent):
         """
         Flusso HITL "brain": il Brain chiede all'operatore prima di valutare un'escalation se la richiesta è marcata come
         da approvare, se `hitl_all` è attivo, oppure se il dispositivo è protetto: in `hitl_targets` (POST /hitl/config o
-        contesto del grafo) o tra i `target_critici_brain` di configurazione.toml.
+        contesto del grafo) o tra i `target_critici_brain` di configurazione.toml o del contesto del grafo (quest'ultimo
+        vale solo per il Brain, non per il flusso HITL sui nodi).
         """
         impostazioni = hitl_manager.get_config()
         contesto = state.get("config", {})
         protetti = (
             set(impostazioni.hitl_targets) | set(contesto.get("hitl_targets", []))
-            | set(get_configurazione().hitl_target_critici_brain)
+            | set(get_configurazione().hitl_target_critici_brain) | set(contesto.get("target_critici_brain", []))
         )
         return bool(
             state.get("hitl_required", False) or impostazioni.hitl_all or contesto.get("hitl_all", False) or target in protetti

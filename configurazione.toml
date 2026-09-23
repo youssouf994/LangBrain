@@ -124,6 +124,15 @@ unita = "BPM"
 intervallo = [0.0, 100.0]
 unita = "%"
 
+# Leve della rete energetica simulata (pagina /energia, agenti in app/agents/agenti_energia.py).
+[dispositivi."rete_el_*"]
+valori = ["ON", "OFF"]
+valore_attivo = "ON"
+
+[dispositivi."rete_gas_*"]
+valori = ["ON", "OFF"]
+valore_attivo = "ON"
+
 # Dispositivi usati dalle demo e dagli script di smoke test.
 [dispositivi.vault_door]
 valori = ["LOCKED", "UNLOCKED", "OPEN", "CLOSED"]

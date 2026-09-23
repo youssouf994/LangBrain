@@ -22,6 +22,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
+from app.api.energia import registra_rotte as registra_rotte_energia
 from app.agents.agent_registry import AgenteConFigliError, AgentRegistry, ErroreGerarchia
 from app.checkpointer import apri_checkpointer, chiudi_checkpointer, get_checkpointer, svuota_checkpoint
 from app.core.configurazione import get_configurazione
@@ -39,6 +40,8 @@ from app.graph.builder import build_graph
 from app.graph.hitl_config import NON_IMPOSTATO, HitlConfigSchema
 from app.graph.timer_hitl import GestoreTimerHitl, timer_attivo
 from app.MAO.model_access_object import PROVIDER_NOTI, Mao, normalizza_provider
+from app.simulazione.esecutore import esecutore as esecutore_energia
+from app.simulazione.sistema_nervoso import sistema_nervoso
 from app.tools.event_log import EventLog
 
 # ---------------------------------------------------------------------------
@@ -120,6 +123,7 @@ async def lifespan(app: FastAPI):
     await apri_checkpointer()
     await _recompile_system_graph()
     sorveglianza_timer = asyncio.create_task(gestore_timer.sorveglia())
+    sistema_nervoso.avvia_sorveglianza()
     try:
         yield
     finally:
@@ -128,6 +132,8 @@ async def lifespan(app: FastAPI):
             await sorveglianza_timer
         except asyncio.CancelledError:
             pass
+        await sistema_nervoso.chiudi()
+        await esecutore_energia.chiudi()
         await chiudi_checkpointer()
 
 
@@ -138,6 +144,9 @@ app = FastAPI(
     lifespan=lifespan,
     dependencies=[Depends(autentica_e_autorizza)],
 )
+
+registra_rotte_energia(app)
+
 
 @app.exception_handler(ErroreLLM)
 async def gestisci_errore_llm(request: Request, errore: ErroreLLM):
@@ -282,6 +291,17 @@ async def pagina_demo():
     if not get_configurazione().demo_pagina_web or not _PAGINA_DEMO.is_file():
         raise HTTPException(status_code=404, detail="Pagina dimostrativa non disponibile.")
     return HTMLResponse(_PAGINA_DEMO.read_text(encoding="utf-8"), headers=_INTESTAZIONI_PAGINA)
+
+
+_PAGINA_ENERGIA = Path(__file__).resolve().parent.parent / "static" / "energia.html"
+
+
+@app.get("/energia", include_in_schema=False)
+async def pagina_energia():
+    """Pagina della simulazione energetica (si disattiva con `[demo] pagina_web = 0`, come /demo)."""
+    if not get_configurazione().demo_pagina_web or not _PAGINA_ENERGIA.is_file():
+        raise HTTPException(status_code=404, detail="Pagina della simulazione energetica non disponibile.")
+    return HTMLResponse(_PAGINA_ENERGIA.read_text(encoding="utf-8"), headers=_INTESTAZIONI_PAGINA)
 
 
 @app.get("/")

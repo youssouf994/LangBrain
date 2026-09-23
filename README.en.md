@@ -185,9 +185,12 @@ LangBrain/
 │   │   ├── database.py             # SQLite schema (events, readings, ...)
 │   │   └── scenario.py             # Reproducible data scenarios
 │   ├── api/
-│   │   └── main.py                 # FastAPI REST API (graph, streaming, HITL, agents, tools, events)
+│   │   ├── main.py                 # FastAPI REST API (graph, streaming, HITL, agents, tools, events)
+│   │   └── energia.py              # /energia/... routes of the energy simulation
+│   ├── simulazione/                # Simulated power and gas network (engine, scenarios, background runner)
 │   ├── static/
-│   │   └── demo_grafo.html         # "Graph in action" page, served on GET /demo
+│   │   ├── demo_grafo.html         # "Graph in action" page, served on GET /demo
+│   │   └── energia.html            # Simulated energy network page, served on GET /energia
 │   └── checkpointer.py             # Persistent LangGraph checkpointer on SQLite
 ├── examples/
 │   ├── avvia_demo.py               # Server + sample scenario + graph web page
@@ -197,11 +200,13 @@ LangBrain/
 │   └── medical_homeostasis/
 │       └── demo_medical_homeostasis.py # Physiological homeostasis and pathology resolution
 ├── scripts/
-│   └── scansione_sicurezza.sh      # Secrets and dependency scan
+│   ├── scansione_sicurezza.sh      # Secrets and dependency scan
+│   └── stress_energia.py           # Load test of the energy simulation
 ├── tests/                          # pytest suite (temporary databases, no real LLM)
 └── docs/
     ├── HOW_TO_CUSTOMIZE.md         # Customization guide and API map
     ├── PROJECT_STATUS.md           # Project status, known limits and roadmap
+    ├── SIMULAZIONE_ENERGIA.md      # Energy network simulation: model, page, API, load test (Italian)
     ├── API_SMOKE_TEST.md           # API smoke test with curl (Bash)
     └── API_SMOKE_TEST_WINDOWS.ps1  # API smoke test for PowerShell
 ```
@@ -238,6 +243,12 @@ Who can do what: API keys have three roles (`tirocinante` read-only, `medico_di_
 2. **Data scenarios (`examples/crea_scenario.py`):** resets a database and creates hierarchy, history and an optional conflict, to try the API by hand (it makes a backup first).
 3. **Smart Home hierarchy (`examples/hierarchical_pattern/demo_hierarchy.py`):** builds the Brain → Organs → Components hierarchy from code and shows the recursive escalation from the door-lock component up to the Brain, which asks for operator approval.
 4. **Medical homeostasis (`examples/medical_homeostasis/demo_medical_homeostasis.py`):** tachycardia (160 BPM) and hypoxia (82% SpO2): the respiratory agent restores saturation to 95%; the severe tachycardia climbs to the Brain and, if rejected, the operator unblocks and the protocol restores 100 BPM.
+
+5. **Simulated energy network (`/energia`):** electricity, gas and storage on plausible Italian data (or on a large generated network for load tests), running from hours to years at adjustable speed, with faults, gas crises and heat waves. A hierarchy of agents (Brain, power and gas organs, four components) works on top of the network, woken by the nervous system when anomalies appear: the agents operate the network levers and ask the operator before measures that stop industry. Details in [`docs/SIMULAZIONE_ENERGIA.md`](docs/SIMULAZIONE_ENERGIA.md) (Italian).
+   ```bash
+   python -m uvicorn app.api.main:app --port 8765     # then open http://127.0.0.1:8765/energia
+   python scripts/stress_energia.py --anni 10          # load test without the server
+   ```
 
 Demos 3 and 4 use their own databases (`demo_gerarchia.db`, `demo_medica.db`) and the default LLM provider from `.env`.
 

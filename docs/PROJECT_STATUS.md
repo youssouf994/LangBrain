@@ -1,6 +1,6 @@
 # Stato del progetto LangBrain
 
-Aggiornato il 2026-09-20. La versione precedente di questo documento era un audit statico con l'elenco dei difetti trovati; quei difetti sono stati corretti (la cronologia Git conserva l'audit originale) e qui resta lo stato attuale, i limiti noti e la roadmap.
+Aggiornato il 2026-09-22. La versione precedente di questo documento era un audit statico con l'elenco dei difetti trovati; quei difetti sono stati corretti (la cronologia Git conserva l'audit originale) e qui resta lo stato attuale, i limiti noti e la roadmap.
 
 ## Sintesi
 
@@ -23,11 +23,13 @@ LangBrain è un boilerplate funzionante per sistemi di agenti gerarchici su Lang
 | Dipendenze | Versioni esatte in `requirements.txt`, elenco completo in `requirements.lock`; `pip-audit` non trova vulnerabilità note. |
 | Test | `python -m pytest tests`: database temporanei, nessun LLM reale, i database veri non vengono mai toccati. Prove per mutazione sui punti critici; prove reali con Mistral/OpenRouter/Gemini eseguite a mano durante lo sviluppo. |
 | CI e sicurezza | `.github/workflows/ci.yml` (test su Python 3.12 e 3.14, gitleaks, pip-audit), `scripts/scansione_sicurezza.sh`, `SECURITY.md`, `CONTRIBUTING.md`. La CI è scritta ma non ancora eseguita su GitHub: il primo push la proverà. |
+| Simulazione energetica | Rete elettrica e gas con accumuli su dati plausibili dell'Italia o su reti generate fino a migliaia di entità, deterministica a parità di seed, durata fino ad anni e velocità regolabile; pagina `/energia`, rotte `/energia/...`, prova di carico `scripts/stress_energia.py` (10 anni di Italia in 24 s senza violazioni dei bilanci). Collegata a una gerarchia di agenti dedicata (Brain, due organi, quattro componenti) dal sistema nervoso: anomalie → stimolo → ciclo del grafo → leve, con approvazione dell'operatore per le leve che fermano l'industria. Vedi `docs/SIMULAZIONE_ENERGIA.md`. |
 | Docker | `Dockerfile` e `docker-compose.yml` (volume SQLite, health check, un worker). Non è stato possibile costruire l'immagine sulla macchina di sviluppo (Docker assente): va provata al primo uso. |
 
 ## Limiti noti
 
 - **Un solo worker.** Tool, configurazione HITL a runtime (`/hitl/config`) e grafo sono in memoria del processo; checkpoint e scadenze HITL stanno su SQLite. La ricompilazione del grafo è serializzata da un lock, ma più processi diverrebbero incoerenti.
+- **Simulazione energetica in memoria**: lo stato si perde al riavvio; rete per zone di mercato, senza flussi di potenza né vincoli di rampa (dettagli in `docs/SIMULAZIONE_ENERGIA.md`).
 - **Stato fisico dei tool in memoria**, non riconciliato con il DB al riavvio; i tool sono simulati (nessun adapter hardware, MQTT o webhook).
 - **`DynamicAgent` gestisce solo il primo target** di `managed_targets` quando ha target diretti.
 - **Dati non usati o non limitati**: la tabella `readings` non viene popolata; `GraphState.reduce_readings` accumula senza finestra temporale.

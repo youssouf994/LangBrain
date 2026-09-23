@@ -33,7 +33,7 @@ VARIABILI_CHIAVE: dict[Ruolo, tuple[str, ...]] = {
     Ruolo.TIROCINANTE: ("API_KEY_TIROCINANTE",),
 }
 
-ROTTE_PUBBLICHE = {("GET", "/"), ("GET", "/demo")}
+ROTTE_PUBBLICHE = {("GET", "/"), ("GET", "/demo"), ("GET", "/energia")}
 
 # Ruolo minimo per ogni endpoint (metodo, percorso). Un endpoint non elencato richiede il ruolo massimo.
 PERMESSI: dict[tuple[str, str], Ruolo] = {
@@ -47,6 +47,11 @@ PERMESSI: dict[tuple[str, str], Ruolo] = {
     ("GET", "/tools"): Ruolo.TIROCINANTE,
     ("GET", "/tools/{device_id}"): Ruolo.TIROCINANTE,
     ("GET", "/events"): Ruolo.TIROCINANTE,
+    ("GET", "/energia/rete"): Ruolo.TIROCINANTE,
+    ("GET", "/energia/stato"): Ruolo.TIROCINANTE,
+    ("GET", "/energia/stream"): Ruolo.TIROCINANTE,
+    ("GET", "/energia/storico"): Ruolo.TIROCINANTE,
+    ("GET", "/energia/entita/{entita_id}"): Ruolo.TIROCINANTE,
     # Procedure ordinarie (/graph/resume con OVERRIDE richiede comunque il primario)
     ("POST", "/graph/run"): Ruolo.MEDICO_DI_GUARDIA,
     ("POST", "/graph/resume"): Ruolo.MEDICO_DI_GUARDIA,
@@ -56,6 +61,10 @@ PERMESSI: dict[tuple[str, str], Ruolo] = {
     ("POST", "/tools"): Ruolo.MEDICO_DI_GUARDIA,
     ("POST", "/events/unblock"): Ruolo.MEDICO_DI_GUARDIA,
     ("DELETE", "/events/reset-conflicts/{target}"): Ruolo.MEDICO_DI_GUARDIA,
+    ("POST", "/energia/controllo"): Ruolo.MEDICO_DI_GUARDIA,
+    ("POST", "/energia/leva"): Ruolo.MEDICO_DI_GUARDIA,
+    ("POST", "/energia/sistema-nervoso/ciclo"): Ruolo.MEDICO_DI_GUARDIA,
+    ("POST", "/energia/sistema-nervoso/decisione"): Ruolo.MEDICO_DI_GUARDIA,
     # Decisioni critiche e configurazione
     ("POST", "/hitl/config"): Ruolo.PRIMARIO,
     ("POST", "/agents/create"): Ruolo.PRIMARIO,
@@ -66,6 +75,9 @@ PERMESSI: dict[tuple[str, str], Ruolo] = {
     ("POST", "/events/seed-conflict"): Ruolo.PRIMARIO,
     ("POST", "/llm/invoke"): Ruolo.PRIMARIO,
     ("DELETE", "/system/reset"): Ruolo.PRIMARIO,
+    ("POST", "/energia/scenario"): Ruolo.PRIMARIO,
+    ("POST", "/energia/evento"): Ruolo.PRIMARIO,
+    ("POST", "/energia/sistema-nervoso/configura"): Ruolo.PRIMARIO,
 }
 
 

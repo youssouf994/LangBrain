@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>LangBrain - rete energetica</title>
+<style>
+  :root {
+    --sfondo: #f5f6f8; --pannello: #ffffff; --bordo: #d9dce3; --testo: #1c2333; --tenue: #667085; --griglia: #eceef2;
+    --accento: #2563eb; --ok: #16a34a; --attenzione: #d97706; --errore: #dc2626; --nodo: #eef1f6;
+    --linea: #3b6fd8; --gas: #0f9b9b; --citta: #5b6477;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --sfondo: #0f131c; --pannello: #171c28; --bordo: #2a3142; --testo: #e6e9f0; --tenue: #93a0b8; --griglia: #222938;
+      --accento: #5b8cff; --ok: #34d17a; --attenzione: #f0a441; --errore: #f26b6b; --nodo: #202739;
+      --linea: #6f9bff; --gas: #2cc4c4; --citta: #aab3c5;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--sfondo); color: var(--testo); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--bordo); background: var(--pannello); }
+  h1 { font-size: 18px; margin: 0; }
+  h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--tenue); margin: 0 0 10px; }
+  main { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 14px; padding: 14px 20px 28px; max-width: 1600px; margin: 0 auto; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; padding: 12px 16px 24px; } }
+  section { background: var(--pannello); border: 1px solid var(--bordo); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+  .colonna { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .riga { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .campi { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 10px; align-items: end; }
+  label.campo { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--tenue); min-width: 0; }
+  button, select, input { font: inherit; color: var(--testo); background: var(--sfondo); border: 1px solid var(--bordo); border-radius: 6px; padding: 6px 10px; min-width: 0; }
+  input[type=checkbox] { padding: 0; }
+  button { cursor: pointer; }
+  button.primario { background: var(--accento); border-color: var(--accento); color: #fff; }
+  button.pericolo { background: var(--errore); border-color: var(--errore); color: #fff; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accento); outline-offset: 2px; }
+  .stato { display: inline-flex; align-items: center; gap: 6px; color: var(--tenue); }
+  .pallino { width: 9px; height: 9px; border-radius: 50%; background: var(--tenue); }
+  .pallino.ok { background: var(--ok); } .pallino.errore { background: var(--errore); }
+  #avviso { display: none; margin: 12px 20px 0; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--errore); color: var(--errore); background: var(--pannello); }
+  .barra { height: 8px; border-radius: 4px; background: var(--griglia); overflow: hidden; flex: 1 1 200px; }
+  .barra > div { height: 100%; width: 0; background: var(--accento); transition: width .2s linear; }
+  .orologio { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 15px; }
+  .etichetta-stato { font-size: 12px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--bordo); color: var(--tenue); }
+  .etichetta-stato.in_corso { color: var(--ok); border-color: var(--ok); }
+  .etichetta-stato.finita { color: var(--accento); border-color: var(--accento); }
+  .prestazioni { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--tenue); margin-top: 8px; font-variant-numeric: tabular-nums; }
+  .prestazioni b { color: var(--testo); font-weight: 600; }
+  .prestazioni .ritardo { color: var(--attenzione); font-weight: 600; }
+  #mappa-contenitore { position: relative; }
+  canvas { display: block; width: 100%; }
+  #mappa { cursor: crosshair; touch-action: manipulation; }
+  #suggerimento { position: absolute; pointer-events: none; display: none; background: var(--pannello); border: 1px solid var(--bordo); border-radius: 6px; padding: 5px 8px; font-size: 12px; max-width: 260px; box-shadow: 0 2px 8px rgba(0,0,0,.15); z-index: 2; }
+  .legenda { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; color: var(--tenue); font-size: 12px; align-items: center; }
+  .legenda svg { vertical-align: -2px; margin-right: 4px; }
+  .tessere { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 8px; }
+  .tessera { border: 1px solid var(--bordo); border-radius: 8px; padding: 7px 10px; background: var(--nodo); min-width: 0; }
+  .tessera span { display: block; font-size: 11.5px; color: var(--tenue); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tessera b { font-size: 17px; font-variant-numeric: tabular-nums; }
+  .tessera small { color: var(--tenue); font-size: 11px; }
+  .tessera.critica { border-color: var(--errore); } .tessera.critica b { color: var(--errore); }
+  .schede { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  .schede button[aria-pressed=true] { background: var(--accento); border-color: var(--accento); color: #fff; }
+  .grafico-titolo { font-size: 12px; color: var(--tenue); margin: 8px 0 2px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+  .grafico-titolo i { font-style: normal; display: inline-flex; align-items: center; gap: 4px; }
+  .grafico-titolo i::before { content: ""; width: 10px; height: 10px; border-radius: 2px; background: var(--c); }
+  ul.elenco { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+  ul.elenco li { border-left: 3px solid var(--bordo); padding: 1px 0 1px 8px; cursor: pointer; overflow-wrap: anywhere; }
+  ul.elenco li.critica { border-color: var(--errore); } ul.elenco li.avviso { border-color: var(--attenzione); }
+  ul.elenco li .tenue, .tenue { color: var(--tenue); }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--griglia); font-variant-numeric: tabular-nums; }
+  td.num { text-align: right; }
+  th { color: var(--tenue); font-weight: 500; }
+  #dettaglio-vuoto { color: var(--tenue); }
+  #albero svg, svg#albero { width: 100%; height: auto; display: block; }
+  .arco { stroke: var(--bordo); stroke-width: 2; fill: none; }
+  .arco.percorso { stroke: var(--accento); stroke-width: 3; }
+  .nodo rect { fill: var(--nodo); stroke: var(--bordo); stroke-width: 2; }
+  .nodo text { fill: var(--testo); font-size: 11px; text-anchor: middle; pointer-events: none; }
+  .nodo .sotto { fill: var(--tenue); font-size: 9.5px; }
+  .nodo.visitato rect { stroke: var(--ok); }
+  .nodo.attivo rect { stroke: var(--accento); stroke-width: 3; animation: pulsa 1.1s ease-in-out infinite; }
+  .nodo.pausa rect { stroke: var(--attenzione); stroke-width: 3; }
+  .nodo.errore rect { stroke: var(--errore); stroke-width: 3; }
+  .nodo .leva-on { fill: var(--ok); } .nodo .leva-off { fill: var(--bordo); }
+  @keyframes pulsa { 50% { fill: color-mix(in srgb, var(--accento) 22%, var(--nodo)); } }
+  @media (prefers-reduced-motion: reduce) { .nodo.attivo rect { animation: none; } }
+  .stato-grafo { font-size: 12px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--bordo); color: var(--tenue); }
+  .stato-grafo.in_esecuzione { color: var(--accento); border-color: var(--accento); }
+  .stato-grafo.in_attesa_operatore { color: var(--attenzione); border-color: var(--attenzione); }
+  #hitl { display: none; border: 2px solid var(--attenzione); border-radius: 8px; padding: 10px 12px; margin-top: 10px; }
+  #hitl p { margin: 0 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+  #hitl textarea { width: 100%; min-height: 48px; margin-top: 8px; font: inherit; color: var(--testo); background: var(--sfondo); border: 1px solid var(--bordo); border-radius: 6px; padding: 6px 10px; }
+  button.ok { background: var(--ok); border-color: var(--ok); color: #fff; }
+  ol#passi { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow: auto; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+  ol#passi li { border-left: 3px solid var(--accento); padding: 1px 0 1px 8px; overflow-wrap: anywhere; }
+  ol#passi li.stimolo { border-color: var(--gas); } ol#passi li.pausa, ol#passi li.operatore { border-color: var(--attenzione); }
+  ol#passi li.errore { border-color: var(--errore); } ol#passi li.fine { border-color: var(--ok); }
+  ol#passi .testa { font-weight: 600; } ol#passi .corpo { color: var(--tenue); white-space: pre-wrap; }
+  .leve { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; font-size: 12.5px; }
+  .pillola { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--bordo); color: var(--tenue); }
+  .pillola.on { color: #fff; background: var(--ok); border-color: var(--ok); }
+  .nascosto { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>LangBrain &middot; rete energetica simulata</h1>
+  <span class="stato"><span class="pallino" id="pallino-server"></span><span id="testo-server">connessione&hellip;</span></span>
+  <label class="riga" for="chiave">Chiave API
+    <input id="chiave" type="password" autocomplete="off" placeholder="X-API-Key" size="14">
+  </label>
+  <button id="salva-chiave" type="button">Usa</button>
+</header>
+<div id="avviso" role="alert"></div>
+
+<main>
+  <div class="colonna">
+    <section aria-labelledby="t-simulazione">
+      <h2 id="t-simulazione">Simulazione</h2>
+      <div class="riga">
+        <button id="avvia" class="primario" type="button">Avvia</button>
+        <button id="pausa" type="button">Pausa</button>
+        <button id="passo" type="button" title="Avanza di un passo (a simulazione ferma)">+1 passo</button>
+        <button id="giorno" type="button" title="Avanza di un giorno simulato (a simulazione ferma)">+1 giorno</button>
+        <label class="riga">Velocità
+          <select id="velocita">
+            <option value="60">1 minuto/s</option>
+            <option value="600">10 minuti/s</option>
+            <option value="3600" selected>1 ora/s</option>
+            <option value="21600">6 ore/s</option>
+            <option value="86400">1 giorno/s</option>
+            <option value="604800">1 settimana/s</option>
+            <option value="2629800">1 mese/s</option>
+            <option value="31557600">1 anno/s</option>
+            <option value="0">massima</option>
+          </select>
+        </label>
+        <span class="etichetta-stato" id="stato-esecuzione">pronta</span>
+      </div>
+      <div class="riga" style="margin-top: 10px">
+        <span class="orologio" id="orologio">&ndash;</span>
+        <div class="barra" role="progressbar" aria-label="Avanzamento" id="barra"><div></div></div>
+        <span class="tenue" id="avanzamento">0%</span>
+      </div>
+      <div class="prestazioni" id="prestazioni" aria-live="off"></div>
+      <details style="margin-top: 10px">
+        <summary>Nuova simulazione</summary>
+        <div class="campi" style="margin-top: 10px">
+          <label class="campo">Scenario
+            <select id="s-tipo"><option value="italia">Italia (dati plausibili)</option><option value="generata">Rete generata (prova di carico)</option></select>
+          </label>
+          <label class="campo">Inizio <input id="s-inizio" type="datetime-local" value="2026-01-01T00:00"></label>
+          <label class="campo">Durata
+            <span class="riga" style="flex-wrap: nowrap"><input id="s-durata" type="number" min="1" value="1" style="width: 70px">
+            <select id="s-unita"><option value="1">ore</option><option value="24">giorni</option><option value="168">settimane</option><option value="730">mesi</option><option value="8760" selected>anni</option></select></span>
+          </label>
+          <label class="campo">Passo
+            <select id="s-passo"><option value="5">5 minuti</option><option value="15">15 minuti</option><option value="30">30 minuti</option><option value="60" selected>1 ora</option></select>
+          </label>
+          <label class="campo">Seed <input id="s-seed" type="number" value="42"></label>
+          <label class="campo generata nascosto">Zone <input id="s-zone" type="number" min="2" max="300" value="40"></label>
+          <label class="campo generata nascosto">Città <input id="s-citta" type="number" min="1" max="20000" value="1000"></label>
+          <label class="campo generata nascosto">Centrali <input id="s-centrali" type="number" min="1" max="10000" value="500"></label>
+        </div>
+        <div class="riga" style="margin-top: 10px">
+          <button id="crea" class="primario" type="button">Crea e sostituisci la simulazione</button>
+          <span class="tenue">Richiede la chiave del primario, se le chiavi sono attive.</span>
+        </div>
+      </details>
+    </section>
+
+    <section aria-labelledby="t-mappa">
+      <div class="riga" style="justify-content: space-between">
+        <h2 id="t-mappa" style="margin: 0">Rete</h2>
+        <div class="riga" style="font-size: 12.5px">
+          <label><input type="checkbox" id="v-elettrica" checked> elettricità</label>
+          <label><input type="checkbox" id="v-gas" checked> gas</label>
+          <label><input type="checkbox" id="v-etichette" checked> etichette</label>
+        </div>
+      </div>
+      <div id="mappa-contenitore" style="margin-top: 8px">
+        <canvas id="mappa" height="480" style="height: 480px" aria-label="Mappa schematica della rete: centrali, città, accumuli, linee elettriche e condotte gas"></canvas>
+        <div id="suggerimento"></div>
+      </div>
+      <div class="legenda" id="legenda"></div>
+      <p class="tenue" style="margin: 6px 0 0; font-size: 12px">Riempimento dei simboli: quota della capacità in uso (centrali, ingressi) o livello (accumuli, stoccaggi). Città rosse: carico non servito. Clicca un simbolo per i dettagli.</p>
+    </section>
+
+    <section aria-labelledby="t-grafici">
+      <h2 id="t-grafici">Andamento nazionale</h2>
+      <div class="schede" role="group" aria-label="Periodo">
+        <button type="button" data-scala="passi" aria-pressed="true">Ultimi 7 giorni</button>
+        <button type="button" data-scala="giorni" aria-pressed="false">Intera simulazione (medie giornaliere)</button>
+      </div>
+      <div class="grafico-titolo" id="legenda-produzione"></div>
+      <canvas id="g-produzione" height="210" style="height: 210px"></canvas>
+      <div class="grafico-titolo"><i style="--c: var(--accento)">prezzo elettricità €/MWh</i><i style="--c: var(--gas)">prezzo gas €/MWh</i><span>(oltre 500 €/MWh, cioè con carico non servito, il prezzo è tagliato a 500)</span></div>
+      <canvas id="g-prezzi" height="130" style="height: 130px"></canvas>
+      <div class="grafico-titolo"><i style="--c: var(--gas)">domanda gas kSm³/h</i><i style="--c: var(--attenzione)">stoccaggi gas % (asse destro)</i></div>
+      <canvas id="g-gas" height="130" style="height: 130px"></canvas>
+    </section>
+  </div>
+
+  <div class="colonna">
+    <section aria-labelledby="t-agenti">
+      <div class="riga" style="justify-content: space-between">
+        <h2 id="t-agenti" style="margin: 0">Agenti LangBrain</h2>
+        <span class="stato-grafo" id="stato-grafo">pronto</span>
+      </div>
+      <svg id="albero" viewBox="0 0 700 260" role="img" aria-label="Gerarchia degli agenti del dominio energia"></svg>
+      <div class="legenda" style="margin-top: 4px">
+        <span>in attesa</span><span style="color: var(--accento)">in esecuzione</span><span style="color: var(--ok)">già eseguito</span>
+        <span style="color: var(--attenzione)">attende l'operatore</span><span>pallino verde: leva accesa · ⚠ leva che chiede il Brain</span>
+      </div>
+      <div class="riga" style="margin-top: 10px">
+        <button id="sveglia" class="primario" type="button" title="Un ciclo del grafo con il modello LLM reale">Sveglia il grafo</button>
+        <label title="Il sistema nervoso sveglia il grafo da solo quando compare un'anomalia nuova (usa il modello LLM reale)"><input type="checkbox" id="sn-automatico"> automatico</label>
+        <label class="riga">ogni almeno <input id="sn-intervallo" type="number" min="1" max="3600" value="20" style="width: 64px"> s</label>
+        <label class="riga">max <input id="sn-massimo" type="number" min="0" max="1000" value="5" style="width: 58px"> cicli</label>
+        <button id="sn-applica" type="button" title="Richiede la chiave del primario">Applica</button>
+      </div>
+      <p class="tenue" id="sn-info" style="margin: 8px 0 0; font-size: 12px"></p>
+      <div id="hitl" aria-live="polite">
+        <b>Il grafo attende l'operatore</b>
+        <p id="hitl-testo"></p>
+        <div class="riga">
+          <button id="hitl-approva" class="ok" type="button">Approva</button>
+          <button id="hitl-respingi" class="pericolo" type="button">Respingi</button>
+          <button id="hitl-override" type="button" title="Richiede la chiave del primario">Override</button>
+        </div>
+        <textarea id="hitl-direttiva" placeholder="Solo per Override: cosa deve fare il sistema (es. accendi rete_gas_gnl_spot e spegni rete_el_interrompibili)"></textarea>
+      </div>
+    </section>
+
+    <section aria-labelledby="t-leve">
+      <h2 id="t-leve">Leve della rete</h2>
+      <div class="leve" id="leve"></div>
+      <p class="tenue" style="margin: 8px 0 0; font-size: 12px">Le comandano gli agenti; puoi azionarle anche a mano (chiave del medico di guardia). Ogni comando finisce nell'audit log.</p>
+    </section>
+
+    <section aria-labelledby="t-passi">
+      <h2 id="t-passi">Passi del grafo</h2>
+      <ol id="passi" aria-live="polite"><li class="tenue">Nessun ciclo eseguito.</li></ol>
+    </section>
+
+    <section aria-labelledby="t-cruscotto">
+      <h2 id="t-cruscotto">Adesso</h2>
+      <div class="tessere" id="tessere"></div>
+    </section>
+
+    <section aria-labelledby="t-dettaglio">
+      <h2 id="t-dettaglio">Entità selezionata</h2>
+      <div id="dettaglio-vuoto">Nessuna: clicca un simbolo sulla mappa o un'anomalia.</div>
+      <div id="dettaglio" class="nascosto">
+        <div class="riga" style="justify-content: space-between"><b id="d-nome"></b><span class="tenue" id="d-categoria"></span></div>
+        <canvas id="g-entita" height="90" style="height: 90px; margin: 8px 0"></canvas>
+        <table><tbody id="d-valori"></tbody></table>
+        <div class="riga" style="margin-top: 8px" id="d-azioni"></div>
+      </div>
+    </section>
+
+    <section aria-labelledby="t-anomalie">
+      <h2 id="t-anomalie">Anomalie in corso <span class="tenue" id="n-anomalie"></span></h2>
+      <ul class="elenco" id="anomalie"><li class="tenue">Nessuna.</li></ul>
+    </section>
+
+    <section aria-labelledby="t-eventi">
+      <h2 id="t-eventi">Eventi</h2>
+      <div class="riga" style="margin-bottom: 8px">
+        <button type="button" data-evento="ondata_calore">Ondata di calore</button>
+        <button type="button" data-evento="ondata_freddo">Ondata di freddo</button>
+        <button type="button" data-evento="calma_vento">Calma di vento</button>
+        <button type="button" data-evento="picco_prezzo_gas">Picco del gas</button>
+      </div>
+      <ul class="elenco" id="eventi"><li class="tenue">Nessun evento attivo.</li></ul>
+    </section>
+
+    <section aria-labelledby="t-riepilogo">
+      <h2 id="t-riepilogo">Dall'inizio della simulazione</h2>
+      <table><tbody id="riepilogo"></tbody></table>
+    </section>
+  </div>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+/* ------------------------------------------------------------------ chiave e API */
+
+let chiave = "";
+try {
+  const dallHash = new URLSearchParams(location.hash.slice(1)).get("k");
+  if (dallHash) { sessionStorage.setItem("langbrain_chiave", dallHash); history.replaceState(null, "", location.pathname); }
+  chiave = sessionStorage.getItem("langbrain_chiave") || "";
+} catch (e) { /* storage non disponibile */ }
+$("chiave").value = chiave;
+$("salva-chiave").addEventListener("click", () => {
+  chiave = $("chiave").value.trim();
+  try { sessionStorage.setItem("langbrain_chiave", chiave); } catch (e) { /* ignora */ }
+  avviaFlusso(true);
+});
+
+function avviso(testo) { $("avviso").textContent = testo || ""; $("avviso").style.display = testo ? "block" : "none"; }
+
+function intestazioni() {
+  const h = { "Content-Type": "application/json" };
+  if (chiave) h["X-API-Key"] = chiave;
+  return h;
+}
+
+async function api(percorso, opzioni = {}) {
+  const r = await fetch(percorso, { ...opzioni, headers: intestazioni() });
+  if (r.status === 401) throw new Error("Chiave API mancante o non valida: inseriscila in alto e premi Usa.");
+  if (!r.ok) {
+    let dettaglio = r.statusText;
+    try { const j = await r.json(); dettaglio = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail || j); } catch (e) { /* non JSON */ }
+    throw new Error(`${r.status}: ${dettaglio}`);
+  }
+  return r.json();
+}
+
+async function post(percorso, corpo) {
+  try { avviso(""); return await api(percorso, { method: "POST", body: JSON.stringify(corpo) }); }
+  catch (e) { avviso(e.message); return null; }
+}
+
+/* ------------------------------------------------------------------ stato */
+
+const S = { rete: null, versioneRete: -1, dati: null, selezionata: null, scala: "passi", posizioni: [], proiezione: null,
+            fps: [], msDisegno: 0, kbMessaggio: 0, ultimoStorico: 0, ultimoDettaglio: 0, disegnoInAttesa: false };
+
+const COLORI_TIPO = {
+  solare: "#e6a800", eolico: "#3aa6d0", idro_fluente: "#2e6fd8", idro_bacino: "#1f4fa8", gas: "#e0702b",
+  carbone: "#7a7f8a", nucleare: "#9b59b6", geotermico: "#b5651d", biomasse: "#4c9a2a", import: "#8e9aaf",
+};
+const NOMI_TIPO = {
+  solare: "fotovoltaico", eolico: "eolico", idro_fluente: "idro fluente", idro_bacino: "idro a bacino", gas: "gas",
+  carbone: "carbone", nucleare: "nucleare", geotermico: "geotermico", biomasse: "biomasse", import: "importazione",
+};
+const COLORI_CATEGORIA = {
+  solare: "#e6a800", eolico: "#3aa6d0", idro: "#2e6fd8", altre: "#4c9a2a", import: "#8e9aaf", carbone: "#7a7f8a", gas: "#e0702b", accumuli: "#c2185b",
+};
+const NOMI_CATEGORIA = { solare: "solare", eolico: "eolico", idro: "idro", altre: "nucleare, geo, biomasse", import: "import", carbone: "carbone", gas: "gas", accumuli: "accumuli" };
+const ORDINE_PILA = ["solare", "eolico", "idro", "altre", "import", "carbone", "gas", "accumuli"];
+
+function css(nome) { return getComputedStyle(document.documentElement).getPropertyValue(nome).trim(); }
+const fmt = (v, cifre = 0) => (v === null || v === undefined || Number.isNaN(v)) ? "–" : Number(v).toLocaleString("it-IT", { maximumFractionDigits: cifre, minimumFractionDigits: cifre });
+const pct = (v, cifre = 0) => fmt(v * 100, cifre) + "%";
+
+/* ------------------------------------------------------------------ flusso SSE */
+
+let controlloFlusso = null;
+async function avviaFlusso(forza) {
+  if (controlloFlusso && !forza) return;
+  if (controlloFlusso) controlloFlusso.abort();
+  const controllo = new AbortController();
+  controlloFlusso = controllo;
+  while (!controllo.signal.aborted) {
+    try {
+      const r = await fetch("/energia/stream?frequenza=5", { headers: intestazioni(), signal: controllo.signal });
+      if (r.status === 401) {
+        // Senza una chiave valida riprovare non serve: si riparte quando l'utente preme "Usa".
+        $("pallino-server").className = "pallino errore"; $("testo-server").textContent = "chiave richiesta";
+        avviso("Chiave API mancante o non valida: inseriscila in alto e premi Usa (basta quella del tirocinante per guardare).");
+        controlloFlusso = null;
+        return;
+      }
+      if (!r.ok) throw new Error(`${r.status}: ${r.statusText}`);
+      $("pallino-server").className = "pallino ok"; $("testo-server").textContent = "collegato";
+      avviso("");
+      const lettore = r.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { value, done } = await lettore.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let fine;
+        while ((fine = buffer.indexOf("\n\n")) >= 0) {
+          const blocco = buffer.slice(0, fine);
+          buffer = buffer.slice(fine + 2);
+          if (blocco.startsWith("data: ")) {
+            S.kbMessaggio = blocco.length / 1024;
+            await ricevi(JSON.parse(blocco.slice(6)));
+          }
+        }
+      }
+    } catch (e) {
+      if (controllo.signal.aborted) return;
+      $("pallino-server").className = "pallino errore"; $("testo-server").textContent = "non collegato";
+      avviso(e.message.includes("Chiave") ? e.message : "Connessione al server persa: nuovo tentativo tra poco.");
+    }
+    await new Promise((ok) => setTimeout(ok, 2000));
+  }
+}
+
+async function ricevi(dati) {
+  if (dati.esecuzione.versione_rete !== S.versioneRete) {
+    S.rete = await api("/energia/rete");
+    S.versioneRete = S.rete.versione_rete;
+    S.proiezione = null;
+    costruisciLegenda();
+    disegnaAlbero(S.rete.albero_agenti || []);
+    if (S.selezionata && !trovaEntita(S.selezionata)) seleziona(null);
+  }
+  S.dati = dati;
+  aggiornaTesti();
+  aggiornaAgenti(dati.sistema_nervoso, dati.istantanea.leve);
+  richiediDisegno();
+  const adesso = performance.now();
+  if (adesso - S.ultimoStorico > 1000) { S.ultimoStorico = adesso; aggiornaStorico(); }
+  if (S.selezionata && adesso - S.ultimoDettaglio > 1000) { S.ultimoDettaglio = adesso; aggiornaDettaglio(); }
+}
+
+/* ------------------------------------------------------------------ testi e cruscotto */
+
+function aggiornaTesti() {
+  const { esecuzione: e, istantanea: ist, riepilogo: r } = S.dati;
+  $("orologio").textContent = new Date(ist.t).toLocaleString("it-IT", { weekday: "short", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  $("barra").firstElementChild.style.width = (e.avanzamento * 100) + "%";
+  $("barra").setAttribute("aria-valuenow", Math.round(e.avanzamento * 100));
+  $("avanzamento").textContent = `${pct(e.avanzamento, 1)} · passo ${fmt(e.passo)} di ${fmt(e.passi_totali)}`;
+  const etichetta = $("stato-esecuzione");
+  etichetta.textContent = { pronta: "pronta", in_corso: "in corso", in_pausa: "in pausa", finita: "finita" }[e.stato] || e.stato;
+  etichetta.className = "etichetta-stato " + e.stato;
+  $("avvia").disabled = e.stato === "in_corso" || e.stato === "finita";
+  $("pausa").disabled = e.stato !== "in_corso";
+  $("passo").disabled = $("giorno").disabled = e.stato === "in_corso" || e.stato === "finita";
+  const sel = $("velocita");
+  if (document.activeElement !== sel && [...sel.options].some((o) => Number(o.value) === e.velocita)) sel.value = String(e.velocita);
+
+  const p = e.prestazioni || {};
+  const fps = S.fps.length > 1 ? (S.fps.length - 1) / ((S.fps[S.fps.length - 1] - S.fps[0]) / 1000) : 0;
+  $("prestazioni").innerHTML = [
+    `entità <b>${fmt(e.entita)}</b>`,
+    `motore <b>${fmt(p.passi_al_secondo ?? 0, 0)}</b> passi/s`,
+    `<b>${fmt(p.ms_per_passo ?? 0, 2)}</b> ms/passo`,
+    `<b>${fmt(p.ore_simulate_al_secondo ?? 0, 1)}</b> ore simulate/s`,
+    `disegno <b>${fmt(S.msDisegno, 1)}</b> ms, <b>${fmt(fps, 0)}</b> fps`,
+    `messaggio <b>${fmt(S.kbMessaggio, 0)}</b> kB`,
+    p.in_ritardo ? `<span class="ritardo">il motore non tiene la velocità richiesta</span>` : "",
+    p.errore ? `<span class="ritardo">${p.errore}</span>` : "",
+  ].filter(Boolean).map((v) => `<span>${v}</span>`).join("");
+
+  const n = ist.nazionale;
+  const prod = n.produzione_mw || {};
+  const tessere = [
+    ["Domanda elettrica", fmt(n.domanda_mw), "MW"],
+    ["Carico non servito", fmt(n.distacco_mw), "MW", n.distacco_mw > 1],
+    ["Rinnovabili", pct(n.quota_rinnovabili || 0), "della generazione"],
+    ["Prezzo elettricità", fmt(n.prezzo_energia, 1), "€/MWh", n.prezzo_energia >= 1000],
+    ["Margine di riserva", pct(n.margine_riserva || 0), `zona più debole: ${n.zona_margine_minimo || "–"}`, (n.margine_riserva || 0) < 0.1],
+    ["Import", fmt(prod.import), "MW"],
+    ["Accumuli", fmt(prod.accumuli), "MW netti (+ scarica)"],
+    ["CO₂", fmt(n.co2_t_h), "t/h"],
+    ["Domanda gas", fmt(n.gas_domanda), "kSm³/h"],
+    ["Gas non servito", fmt(n.gas_non_servito), "kSm³/h", n.gas_non_servito > 1],
+    ["Stoccaggi gas", pct(n.stoccaggio_gas_pct || 0, 1), `obiettivo ${pct(n.obiettivo_stoccaggio_pct || 0)}`, (n.stoccaggio_gas_pct || 0) < 0.1],
+    ["Prezzo gas", fmt(n.prezzo_gas, 1), "€/MWh"],
+  ];
+  $("tessere").innerHTML = tessere.map(([t, v, u, c]) => `<div class="tessera${c ? " critica" : ""}"><span>${t}</span><b>${v}</b> <small>${u}</small></div>`).join("");
+
+  $("n-anomalie").textContent = ist.numero_anomalie ? `(${ist.numero_anomalie})` : "";
+  const anomalie = ist.anomalie.slice().sort((a, b) => (a.gravita === "critica" ? 0 : 1) - (b.gravita === "critica" ? 0 : 1));
+  $("anomalie").innerHTML = anomalie.length
+    ? anomalie.map((a) => `<li class="${a.gravita}" data-entita="${esc(a.entita)}">${esc(a.descrizione)} <span class="tenue">· da ${fmt(a.da_ore, 1)} h</span></li>`).join("")
+    : `<li class="tenue">Nessuna.</li>`;
+  $("eventi").innerHTML = ist.eventi_attivi.length
+    ? ist.eventi_attivi.slice().reverse().map((ev) => `<li data-entita="${esc(ev.entita || "")}">${esc(ev.descrizione)} <span class="tenue">· fino al ${new Date(ev.fine).toLocaleString("it-IT", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span></li>`).join("")
+    : `<li class="tenue">Nessun evento attivo.</li>`;
+
+  const righe = [
+    ["Ore simulate", fmt(r.ore_simulate)],
+    ["Domanda elettrica", fmt(r.domanda_twh, 2) + " TWh"],
+    ...ORDINE_PILA.map((k) => [`· ${NOMI_CATEGORIA[k]}`, fmt(r.produzione_twh[k], 2) + " TWh"]),
+    ["Quota rinnovabili (solare, eolico, idro)", pct(r.quota_rinnovabili_fer, 1)],
+    ["Rinnovabili tagliate", fmt(r.taglio_rinnovabili_twh, 2) + " TWh"],
+    ["Carico non servito", `${fmt(r.distacco_mwh)} MWh in ${fmt(r.ore_con_distacco, 1)} h`],
+    ["Prezzo medio / massimo", `${fmt(r.prezzo_medio, 1)} / ${fmt(r.prezzo_massimo, 0)} €/MWh`],
+    ["CO₂", fmt(r.co2_mt, 2) + " Mt"],
+    ["Gas consumato", fmt(r.gas_domanda_mld_m3, 2) + " mld m³"],
+    ["Gas da gasdotti / GNL / produzione", `${fmt(r.gas_ingressi_mld_m3.gasdotto, 1)} / ${fmt(r.gas_ingressi_mld_m3.gnl, 1)} / ${fmt(r.gas_ingressi_mld_m3.produzione, 1)} mld m³`],
+    ["Gas non servito", fmt(r.gas_non_servito_msm3, 1) + " mln m³"],
+    ["Carico massimo delle linee", pct(r.carico_massimo_linee)],
+    ["Eventi", Object.entries(r.eventi_per_tipo).map(([k, v]) => `${k.replaceAll("_", " ")} ${v}`).join(", ") || "nessuno"],
+  ];
+  $("riepilogo").innerHTML = righe.map(([k, v]) => `<tr><th>${k}</th><td class="num">${v}</td></tr>`).join("");
+}
+
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+function costruisciLegenda() {
+  const tipi = [...new Set(S.rete.centrali.map((c) => c.tipo))];
+  const simbolo = (forma, colore) => {
+    const f = { tri: `<polygon points="6,1 11,11 1,11" fill="${colore}"/>`, qua: `<rect x="2" y="2" width="8" height="8" fill="${colore}"/>`,
+                rom: `<polygon points="6,1 11,6 6,11 1,6" fill="${colore}"/>`, cer: `<circle cx="6" cy="6" r="4.5" fill="none" stroke="${colore}" stroke-width="2"/>`,
+                esa: `<polygon points="3,1.5 9,1.5 11.5,6 9,10.5 3,10.5 0.5,6" fill="${colore}"/>`,
+                lin: `<line x1="0" y1="6" x2="12" y2="6" stroke="${colore}" stroke-width="3"/>`,
+                trat: `<line x1="0" y1="6" x2="12" y2="6" stroke="${colore}" stroke-width="3" stroke-dasharray="3 2"/>` }[forma];
+    return `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">${f}</svg>`;
+  };
+  const voci = tipi.map((t) => `<span>${simbolo("tri", COLORI_TIPO[t])}${NOMI_TIPO[t] || t}</span>`);
+  voci.push(`<span>${simbolo("qua", css("--citta"))}città</span>`, `<span>${simbolo("rom", "#c2185b")}accumulo</span>`,
+            `<span>${simbolo("cer", css("--gas"))}ingresso gas</span>`, `<span>${simbolo("esa", css("--gas"))}stoccaggio gas</span>`,
+            `<span>${simbolo("lin", css("--linea"))}linea elettrica</span>`, `<span>${simbolo("trat", css("--gas"))}condotta gas</span>`,
+            `<span>${simbolo("lin", css("--attenzione"))}linea quasi satura</span>`, `<span>${simbolo("lin", css("--errore"))}satura o guasta</span>`);
+  $("legenda").innerHTML = voci.join("");
+}
+
+/* ------------------------------------------------------------------ mappa */
+
+function proiezione(canvas) {
+  const rete = S.rete;
+  const punti = [...rete.zone, ...rete.centrali, ...rete.citta, ...rete.accumuli, ...rete.ingressi, ...rete.stoccaggi];
+  if (rete.scenario.nome === "Italia") for (const poligono of CONTORNO_ITALIA) for (const [x, y] of poligono) punti.push({ x, y });
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of punti) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); }
+  const coseno = Math.cos(((minY + maxY) / 2) * Math.PI / 180);
+  const larghezza = canvas.clientWidth;
+  const altezzaMondo = (maxY - minY) || 1, larghezzaMondo = ((maxX - minX) || 1) * coseno;
+  const altezza = Math.min(Math.max(larghezza * altezzaMondo / larghezzaMondo, 320), 820);
+  const margine = 26;
+  const scala = Math.min((larghezza - 2 * margine) / larghezzaMondo, (altezza - 2 * margine) / altezzaMondo);
+  const ox = (larghezza - larghezzaMondo * scala) / 2, oy = (altezza - altezzaMondo * scala) / 2;
+  return { larghezza, altezza, f: (x, y) => [ox + (x - minX) * coseno * scala, oy + (maxY - y) * scala] };
+}
+
+function richiediDisegno() {
+  if (S.disegnoInAttesa) return;
+  S.disegnoInAttesa = true;
+  requestAnimationFrame(() => { S.disegnoInAttesa = false; disegnaMappa(); });
+}
+
+function colorePerCarico(carico, guasto) {
+  if (guasto) return css("--errore");
+  if (carico >= 0.98) return css("--errore");
+  if (carico >= 0.8) return css("--attenzione");
+  return null;
+}
+
+function disegnaMappa() {
+  if (!S.rete || !S.dati) return;
+  const inizio = performance.now();
+  const canvas = $("mappa");
+  if (!S.proiezione || S.proiezione.larghezza !== canvas.clientWidth) {
+    S.proiezione = proiezione(canvas);
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = S.proiezione.larghezza * dpr; canvas.height = S.proiezione.altezza * dpr;
+    canvas.style.height = S.proiezione.altezza + "px";
+    canvas.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  const { f } = S.proiezione;
+  const ctx = canvas.getContext("2d");
+  const rete = S.rete, ist = S.dati.istantanea;
+  const molte = rete.scenario.entita > 600;
+  const colTesto = css("--testo"), colTenue = css("--tenue"), colGriglia = css("--griglia"), colLinea = css("--linea"), colGas = css("--gas");
+  const colErrore = css("--errore"), colCitta = css("--citta"), colPannello = css("--pannello");
+  ctx.clearRect(0, 0, S.proiezione.larghezza, S.proiezione.altezza);
+  const pos = {};
+  rete.zone.forEach((z) => { pos[z.id] = f(z.x, z.y); });
+  S.posizioni = [];
+
+  // Contorno schematico della penisola e delle isole maggiori (solo scenario Italia)
+  if (rete.scenario.nome === "Italia") {
+    ctx.fillStyle = css("--nodo"); ctx.strokeStyle = css("--bordo"); ctx.lineWidth = 1.2;
+    for (const poligono of CONTORNO_ITALIA) {
+      ctx.beginPath();
+      poligono.forEach(([x, y], i) => { const [px, py] = f(x, y); if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); });
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+  }
+
+  // Collegamenti delle entità al nodo della zona (solo per reti piccole)
+  if (!molte) {
+    ctx.strokeStyle = colGriglia; ctx.lineWidth = 1; ctx.beginPath();
+    for (const elenco of [rete.centrali, rete.citta, rete.accumuli, rete.ingressi, rete.stoccaggi]) {
+      for (const e of elenco) { const [x, y] = f(e.x, e.y); const [zx, zy] = pos[e.zona]; ctx.moveTo(x, y); ctx.lineTo(zx, zy); }
+    }
+    ctx.stroke();
+  }
+
+  const arco = (da, a, spostamento) => {
+    const [x1, y1] = pos[da], [x2, y2] = pos[a];
+    const lung = Math.hypot(x2 - x1, y2 - y1) || 1;
+    const nx = -(y2 - y1) / lung * spostamento, ny = (x2 - x1) / lung * spostamento;
+    return [x1 + nx, y1 + ny, x2 + nx, y2 + ny];
+  };
+  const freccia = (x1, y1, x2, y2, verso, colore) => {
+    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    const ang = Math.atan2(y2 - y1, x2 - x1) + (verso < 0 ? Math.PI : 0);
+    ctx.fillStyle = colore; ctx.beginPath();
+    ctx.moveTo(mx + Math.cos(ang) * 6, my + Math.sin(ang) * 6);
+    ctx.lineTo(mx + Math.cos(ang + 2.5) * 5, my + Math.sin(ang + 2.5) * 5);
+    ctx.lineTo(mx + Math.cos(ang - 2.5) * 5, my + Math.sin(ang - 2.5) * 5);
+    ctx.fill();
+  };
+  const disegnaRete = (elenco, valori, capacitaNominale, colBase, tratteggio, spostamento, categoria) => {
+    elenco.forEach((l, i) => {
+      const [flusso, guasto, capacita] = valori[i];
+      const carico = capacita > 0 ? Math.abs(flusso) / capacita : (guasto ? 1 : 0);
+      const [x1, y1, x2, y2] = arco(l.da, l.a, spostamento);
+      ctx.strokeStyle = colorePerCarico(carico, guasto && capacita <= 0) || colBase;
+      ctx.lineWidth = 1.5 + 5 * Math.min(1, Math.sqrt(capacitaNominale(l) / S.maxCapacita[categoria]));
+      ctx.globalAlpha = 0.35 + 0.65 * Math.min(1, carico);
+      ctx.setLineDash(guasto ? [2, 4] : tratteggio);
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.setLineDash([]);
+      if (Math.abs(flusso) > 1 && !molte) freccia(x1, y1, x2, y2, Math.sign(flusso), ctx.strokeStyle);
+      S.posizioni.push({ id: l.id, x: (x1 + x2) / 2, y: (y1 + y2) / 2, cat: categoria, i });
+    });
+  };
+  S.maxCapacita = {
+    linea: Math.max(1, ...rete.linee.map((l) => l.capacita_mw)),
+    condotta: Math.max(1, ...rete.condotte.map((c) => c.capacita)),
+  };
+  if ($("v-elettrica").checked) disegnaRete(rete.linee, ist.linee, (l) => l.capacita_mw, colLinea, [], -3, "linea");
+  if ($("v-gas").checked) disegnaRete(rete.condotte, ist.condotte, (c) => c.capacita, colGas, [7, 4], 3, "condotta");
+
+  // Nodi delle zone
+  rete.zone.forEach((z, i) => {
+    const [x, y] = pos[z.id];
+    const [, , , , , distacco] = ist.zone[i];
+    ctx.fillStyle = distacco > 1 ? colErrore : colTenue;
+    ctx.beginPath(); ctx.arc(x, y, molte ? 3 : 5, 0, Math.PI * 2); ctx.fill();
+    S.posizioni.push({ id: z.id, x, y, cat: "zona", i });
+  });
+
+  const dimensione = (valore, massimo, min, max) => min + (max - min) * Math.sqrt(Math.max(0, valore) / massimo);
+  const scalaSimboli = molte ? 0.55 : 1;
+
+  // Città: quadrati, lato proporzionale alla radice della domanda media
+  const maxDomanda = Math.max(1, ...rete.citta.map((c) => c.domanda_media_mw));
+  rete.citta.forEach((c, i) => {
+    const [x, y] = f(c.x, c.y);
+    const [domanda, servita, gasDomanda, gasServito] = ist.citta[i];
+    const lato = dimensione(c.domanda_media_mw, maxDomanda, 4, 16) * scalaSimboli;
+    const nonServita = domanda > 0 ? 1 - servita / domanda : 0;
+    ctx.fillStyle = nonServita > 0.001 ? colErrore : colCitta;
+    ctx.fillRect(x - lato / 2, y - lato / 2, lato, lato);
+    if (gasDomanda - gasServito > 0.5) { ctx.strokeStyle = css("--attenzione"); ctx.lineWidth = 2; ctx.strokeRect(x - lato / 2 - 2, y - lato / 2 - 2, lato + 4, lato + 4); }
+    S.posizioni.push({ id: c.id, x, y, cat: "citta", i });
+  });
+
+  // Centrali: triangoli colorati per tecnologia, riempiti in proporzione alla produzione
+  const maxPotenza = Math.max(1, ...rete.centrali.map((c) => c.potenza_mw));
+  rete.centrali.forEach((c, i) => {
+    const [x, y] = f(c.x, c.y);
+    const [produzione, , stato] = ist.centrali[i];
+    const r = dimensione(c.potenza_mw, maxPotenza, 4, 14) * scalaSimboli;
+    const colore = COLORI_TIPO[c.tipo] || colTenue;
+    const quota = c.potenza_mw > 0 ? Math.min(1, produzione / c.potenza_mw) : 0;
+    ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r * 0.9, y + r * 0.7); ctx.lineTo(x - r * 0.9, y + r * 0.7); ctx.closePath();
+    ctx.globalAlpha = 0.15 + 0.85 * quota; ctx.fillStyle = colore; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.strokeStyle = stato === 2 ? colErrore : (stato === 1 ? colTenue : colore); ctx.lineWidth = stato ? 2 : 1.2;
+    if (stato === 1) ctx.setLineDash([2, 2]);
+    ctx.stroke(); ctx.setLineDash([]);
+    if (stato === 2) { ctx.strokeStyle = colErrore; ctx.beginPath(); ctx.moveTo(x - r / 2, y - r / 3); ctx.lineTo(x + r / 2, y + r / 2); ctx.moveTo(x + r / 2, y - r / 3); ctx.lineTo(x - r / 2, y + r / 2); ctx.stroke(); }
+    S.posizioni.push({ id: c.id, x, y, cat: "centrale", i });
+  });
+
+  // Accumuli: rombi, riempimento = livello di carica; bordo verde in scarica, blu in carica
+  rete.accumuli.forEach((a, i) => {
+    const [x, y] = f(a.x, a.y);
+    const [livello, potenza, guasto] = ist.accumuli[i];
+    const r = 7 * scalaSimboli + 2;
+    const rombo = () => { ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); };
+    rombo(); ctx.fillStyle = colPannello; ctx.fill();
+    ctx.save(); rombo(); ctx.clip(); ctx.fillStyle = "#c2185b"; ctx.fillRect(x - r, y + r - 2 * r * livello, 2 * r, 2 * r * livello); ctx.restore();
+    rombo(); ctx.lineWidth = 2; ctx.strokeStyle = guasto ? colErrore : (potenza > 1 ? css("--ok") : (potenza < -1 ? css("--accento") : "#c2185b")); ctx.stroke();
+    S.posizioni.push({ id: a.id, x, y, cat: "accumulo", i });
+  });
+
+  if ($("v-gas").checked) {
+    // Ingressi gas: cerchi, riempimento = portata / massimo
+    rete.ingressi.forEach((g, i) => {
+      const [x, y] = f(g.x, g.y);
+      const [portata, riduzione] = ist.ingressi[i];
+      const r = 6 * scalaSimboli + 2;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.globalAlpha = 0.1 + 0.9 * Math.min(1, portata / g.portata_max); ctx.fillStyle = colGas; ctx.fill(); ctx.globalAlpha = 1;
+      ctx.lineWidth = 2; ctx.strokeStyle = riduzione < 1 ? colErrore : colGas; ctx.stroke();
+      S.posizioni.push({ id: g.id, x, y, cat: "ingresso", i });
+    });
+    // Stoccaggi gas: esagoni, riempimento = giacenza
+    rete.stoccaggi.forEach((st, i) => {
+      const [x, y] = f(st.x, st.y);
+      const [livello, portata] = ist.stoccaggi[i];
+      const r = 8 * scalaSimboli + 2;
+      const esagono = () => { ctx.beginPath(); for (let k = 0; k < 6; k++) { const a = Math.PI / 3 * k; ctx.lineTo(x + r * Math.cos(a), y + r * Math.sin(a)); } ctx.closePath(); };
+      esagono(); ctx.fillStyle = colPannello; ctx.fill();
+      ctx.save(); esagono(); ctx.clip(); ctx.fillStyle = colGas; ctx.fillRect(x - r, y + r - 2 * r * livello, 2 * r, 2 * r * livello); ctx.restore();
+      esagono(); ctx.lineWidth = 2; ctx.strokeStyle = portata > 1 ? css("--attenzione") : colGas; ctx.stroke();
+      S.posizioni.push({ id: st.id, x, y, cat: "stoccaggio", i });
+    });
+  }
+
+  // Etichette: zone sempre (se poche), nomi delle città solo nello scenario piccolo
+  if ($("v-etichette").checked) {
+    ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    const contorno = (testo, x, y) => { ctx.lineWidth = 3; ctx.strokeStyle = colPannello; ctx.strokeText(testo, x, y); ctx.fillText(testo, x, y); };
+    if (rete.zone.length <= 40) {
+      ctx.fillStyle = colTenue;
+      ctx.font = "600 11px system-ui, sans-serif"; ctx.textBaseline = "bottom";
+      rete.zone.forEach((z, i) => { const [x, y] = pos[z.id]; contorno(`${z.nome} ${fmt(ist.zone[i][0], 0)}°C`, x, y - 7); });
+      ctx.font = "11px system-ui, sans-serif"; ctx.textBaseline = "top";
+    }
+    if (!molte) {
+      ctx.fillStyle = colTesto;
+      rete.citta.forEach((c) => { const [x, y] = f(c.x, c.y); contorno(c.nome, x, y + 8); });
+    }
+  }
+
+  // Selezione
+  if (S.selezionata) {
+    const p = S.posizioni.find((q) => q.id === S.selezionata);
+    if (p) { ctx.strokeStyle = css("--accento"); ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI * 2); ctx.stroke(); }
+  }
+
+  S.msDisegno = performance.now() - inizio;
+  const adesso = performance.now();
+  S.fps.push(adesso);
+  while (S.fps.length > 1 && adesso - S.fps[0] > 2000) S.fps.shift();
+}
+
+function piuVicina(ev) {
+  const r = $("mappa").getBoundingClientRect();
+  const x = ev.clientX - r.left, y = ev.clientY - r.top;
+  let migliore = null, distanza = 14 * 14;
+  for (const p of S.posizioni) {
+    const d = (p.x - x) ** 2 + (p.y - y) ** 2;
+    if (d < distanza) { distanza = d; migliore = p; }
+  }
+  return migliore;
+}
+
+function trovaEntita(id) {
+  if (!S.rete) return null;
+  const categorie = [["zone", "zona"], ["centrali", "centrale"], ["citta", "citta"], ["accumuli", "accumulo"], ["linee", "linea"], ["ingressi", "ingresso"], ["stoccaggi", "stoccaggio"], ["condotte", "condotta"]];
+  for (const [chiaveElenco, cat] of categorie) {
+    const i = S.rete[chiaveElenco].findIndex((e) => e.id === id);
+    if (i >= 0) return { cat, i, e: S.rete[chiaveElenco][i], elenco: chiaveElenco };
+  }
+  return null;
+}
+
+function descrizioneBreve(id) {
+  const t = trovaEntita(id);
+  if (!t || !S.dati) return id;
+  const v = S.dati.istantanea[t.elenco][t.i];
+  const nome = t.e.nome || t.e.id.replace(/^[a-z]+:/, "");
+  switch (t.cat) {
+    case "centrale": return `${nome} (${NOMI_TIPO[t.e.tipo] || t.e.tipo})<br>${fmt(v[0])} di ${fmt(t.e.potenza_mw)} MW${v[2] === 2 ? " · GUASTO" : v[2] === 1 ? " · manutenzione" : ""}`;
+    case "citta": return `${nome}<br>domanda ${fmt(v[0])} MW, servita ${fmt(v[1])} MW<br>gas ${fmt(v[2])} kSm³/h`;
+    case "accumulo": return `${nome}<br>carica ${pct(v[0])}, ${v[1] > 0 ? "scarica" : v[1] < 0 ? "carica" : "fermo"} ${fmt(Math.abs(v[1]))} MW`;
+    case "linea": return `Linea ${t.e.da}–${t.e.a}<br>${fmt(Math.abs(v[0]))} di ${fmt(v[2])} MW${v[1] ? " · GUASTO" : ""}`;
+    case "condotta": return `Condotta ${t.e.da}–${t.e.a}<br>${fmt(Math.abs(v[0]))} di ${fmt(v[2])} kSm³/h${v[1] ? " · GUASTO" : ""}`;
+    case "ingresso": return `${nome}<br>${fmt(v[0])} di ${fmt(t.e.portata_max)} kSm³/h${v[1] < 1 ? ` · crisi (${pct(v[1])})` : ""}`;
+    case "stoccaggio": return `${nome}<br>pieno al ${pct(v[0], 1)}, ${v[1] > 0 ? "erogazione" : v[1] < 0 ? "iniezione" : "fermo"} ${fmt(Math.abs(v[1]))} kSm³/h`;
+    case "zona": return `${nome}<br>${fmt(v[0], 1)} °C, vento ${fmt(v[1], 1)} m/s, nuvole ${pct(v[2])}<br>domanda ${fmt(v[4])} MW${t.e.rete_gas ? `, gas ${fmt(v[3], 1)} bar` : ", senza rete gas"}`;
+  }
+  return nome;
+}
+
+$("mappa").addEventListener("mousemove", (ev) => {
+  const p = piuVicina(ev);
+  const box = $("suggerimento");
+  if (!p) { box.style.display = "none"; return; }
+  box.innerHTML = descrizioneBreve(p.id);
+  box.style.display = "block";
+  const larghezza = $("mappa").clientWidth;
+  box.style.left = Math.min(p.x + 14, larghezza - 200) + "px";
+  box.style.top = (p.y + 14) + "px";
+});
+$("mappa").addEventListener("mouseleave", () => { $("suggerimento").style.display = "none"; });
+$("mappa").addEventListener("click", (ev) => { const p = piuVicina(ev); seleziona(p ? p.id : null); });
+for (const id of ["v-elettrica", "v-gas", "v-etichette"]) $(id).addEventListener("change", richiediDisegno);
+window.addEventListener("resize", () => { S.proiezione = null; richiediDisegno(); disegnaGrafici(); });
+if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { costruisciLegenda(); richiediDisegno(); disegnaGrafici(); });
+
+/* ------------------------------------------------------------------ dettaglio */
+
+const ETICHETTE = {
+  tipo: "tipo", zona: "zona", potenza_mw: "potenza (MW)", produzione_mw: "produzione (MW)", disponibile_mw: "disponibile (MW)",
+  rendimento: "rendimento", riserva_bacino_mwh: "riserva bacino (MWh)", bacino_mwh: "capienza bacino (MWh)", in_manutenzione: "in manutenzione",
+  popolazione: "popolazione (milioni)", domanda_media_mw: "domanda media (MW)", domanda_mw: "domanda (MW)", servita_mw: "servita (MW)",
+  gas_domanda: "gas richiesto (kSm³/h)", gas_servito: "gas servito (kSm³/h)", capacita_mwh: "capacità (MWh)", carica_mwh: "carica (MWh)",
+  potenza_attuale_mw: "potenza (MW, + scarica)", capacita_mw: "capacità (MW)", flusso_mw: "flusso (MW)", da: "da", a: "a",
+  portata_max: "portata massima (kSm³/h)", portata: "portata (kSm³/h)", riduzione: "disponibilità", capacita: "capacità",
+  giacenza: "giacenza (mln m³)", erogazione_max: "erogazione massima (kSm³/h)", iniezione_max: "iniezione massima (kSm³/h)", flusso: "flusso (kSm³/h)",
+  temperatura: "temperatura (°C)", vento: "vento (m/s)", nuvole: "nuvole", pressione: "pressione gas (bar)", linepack: "linepack (kSm³)",
+  distacco_mw: "carico non servito (MW)", gas_non_servito: "gas non servito (kSm³/h)", fattore_gas: "gas disponibile per le centrali",
+};
+const UNITA_STORICO = { centrale: "produzione MW", citta: "domanda MW", accumulo: "carica %", linea: "flusso MW", ingresso: "portata kSm³/h", stoccaggio: "riempimento %", condotta: "flusso kSm³/h", zona: "temperatura °C" };
+
+function seleziona(id) {
+  S.selezionata = id;
+  $("dettaglio").classList.toggle("nascosto", !id);
+  $("dettaglio-vuoto").classList.toggle("nascosto", !!id);
+  if (id) aggiornaDettaglio();
+  richiediDisegno();
+}
+
+async function aggiornaDettaglio() {
+  const id = S.selezionata;
+  if (!id) return;
+  let d;
+  try { d = await api(`/energia/entita/${encodeURIComponent(id)}`); } catch (e) { return; }
+  if (S.selezionata !== id) return;
+  const v = d.valori;
+  $("d-nome").textContent = v.nome || id;
+  $("d-categoria").textContent = `${d.categoria} · ${id}`;
+  $("d-valori").innerHTML = Object.entries(ETICHETTE).filter(([k]) => k in v).map(([k, etichetta]) => {
+    let valore = v[k];
+    if (typeof valore === "number") valore = Math.abs(valore) < 10 && !Number.isInteger(valore) ? fmt(valore, 2) : fmt(valore, 0);
+    else if (typeof valore === "boolean") valore = valore ? "sì" : "no";
+    else valore = esc(valore);
+    return `<tr><th>${etichetta}</th><td class="num">${valore}</td></tr>`;
+  }).join("") + d.anomalie.map((a) => `<tr><th>anomalia</th><td class="num">${esc(a.descrizione)}</td></tr>`).join("")
+    + d.eventi_attivi.map((e) => `<tr><th>evento</th><td class="num">${esc(e.descrizione)}</td></tr>`).join("");
+  const azioni = [];
+  if (["centrale", "linea", "condotta", "accumulo"].includes(d.categoria)) azioni.push(`<button type="button" class="pericolo" data-azione="guasto">Provoca un guasto (24 h)</button>`);
+  if (d.categoria === "ingresso") azioni.push(`<button type="button" class="pericolo" data-azione="crisi_gas">Crisi di fornitura (7 giorni)</button>`);
+  if (d.eventi_attivi.some((e) => e.tipo === "guasto" || e.tipo === "crisi_gas")) azioni.push(`<button type="button" data-azione="ripristino">Ripristina</button>`);
+  $("d-azioni").innerHTML = azioni.join("");
+  const serie = d.storico_orario.map(([, valore]) => (["accumulo", "stoccaggio"].includes(d.categoria) ? valore * 100 : valore));
+  graficoLinee($("g-entita"), serie.map((_, i) => i), [{ valori: serie, colore: css("--accento") }], { etichetta: UNITA_STORICO[d.categoria] + " (ultime " + serie.length + " ore)" });
+}
+
+$("d-azioni").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("button[data-azione]");
+  if (!b || !S.selezionata) return;
+  await post("/energia/evento", { tipo: b.dataset.azione, entita: S.selezionata });
+  aggiornaDettaglio();
+});
+for (const lista of ["anomalie", "eventi"]) {
+  $(lista).addEventListener("click", (ev) => {
+    const li = ev.target.closest("li[data-entita]");
+    if (li && li.dataset.entita && trovaEntita(li.dataset.entita)) seleziona(li.dataset.entita);
+  });
+}
+document.querySelectorAll("button[data-evento]").forEach((b) => b.addEventListener("click", () => post("/energia/evento", { tipo: b.dataset.evento })));
+
+/* ------------------------------------------------------------------ grafici */
+
+function preparaCanvas(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = Number(canvas.getAttribute("height"));
+  if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; canvas.style.height = h + "px"; }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  return { ctx, w, h };
+}
+
+function assi(ctx, w, h, max, min, sinistra, destra, etichette, formatoY) {
+  ctx.strokeStyle = css("--griglia"); ctx.fillStyle = css("--tenue"); ctx.lineWidth = 1;
+  ctx.font = "10.5px system-ui, sans-serif"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  for (let k = 0; k <= 4; k++) {
+    const y = 6 + (h - 24) * (1 - k / 4);
+    ctx.beginPath(); ctx.moveTo(sinistra, y); ctx.lineTo(w - destra, y); ctx.stroke();
+    ctx.fillText(formatoY(min + (max - min) * k / 4), sinistra - 4, y);
+  }
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  if (etichette.length) {
+    const n = Math.min(6, etichette.length);
+    for (let k = 0; k < n; k++) {
+      const i = Math.round((etichette.length - 1) * k / Math.max(1, n - 1));
+      const x = sinistra + (w - sinistra - destra) * (etichette.length > 1 ? i / (etichette.length - 1) : 0);
+      ctx.fillText(etichette[i], x, h - 15);
+    }
+  }
+}
+
+const compatto = (v) => Math.abs(v) >= 10000 ? fmt(v / 1000, 0) + "k" : fmt(v, v !== 0 && Math.abs(v) < 10 ? 1 : 0);
+
+function graficoLinee(canvas, _x, serie, opzioni = {}) {
+  const { ctx, w, h } = preparaCanvas(canvas);
+  const tutti = serie.filter((s) => !s.destra).flatMap((s) => s.valori).filter(Number.isFinite);
+  if (!tutti.length) { ctx.fillStyle = css("--tenue"); ctx.font = "12px system-ui"; ctx.fillText("Nessun dato ancora.", 10, 20); return; }
+  const max = Math.max(...tutti) * 1.05 || 1, min = Math.min(0, Math.min(...tutti));
+  const sinistra = 42, destra = serie.some((s) => s.destra) ? 38 : 8;
+  assi(ctx, w, h, max, min, sinistra, destra, opzioni.etichetteX || [], compatto);
+  const n = Math.max(...serie.map((s) => s.valori.length));
+  const X = (i) => sinistra + (w - sinistra - destra) * (n > 1 ? i / (n - 1) : 0);
+  for (const s of serie) {
+    const [lo, hi] = s.destra ? [0, s.max ?? 100] : [min, max];
+    const Y = (v) => 6 + (h - 24) * (1 - (v - lo) / ((hi - lo) || 1));
+    ctx.strokeStyle = s.colore; ctx.lineWidth = 1.6; ctx.beginPath();
+    s.valori.forEach((v, i) => { if (i) ctx.lineTo(X(i), Y(v)); else ctx.moveTo(X(i), Y(v)); });
+    ctx.stroke();
+    if (s.destra) {
+      ctx.fillStyle = s.colore; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      for (let k = 0; k <= 4; k++) ctx.fillText(fmt((s.max ?? 100) * k / 4) + "%", w - destra + 4, 6 + (h - 24) * (1 - k / 4));
+    }
+  }
+  if (opzioni.etichetta) { ctx.fillStyle = css("--tenue"); ctx.textAlign = "left"; ctx.textBaseline = "top"; ctx.fillText(opzioni.etichetta, sinistra + 4, 6); }
+}
+
+function graficoPila(canvas, serie, etichetteX) {
+  const { ctx, w, h } = preparaCanvas(canvas);
+  if (!serie.length) { ctx.fillStyle = css("--tenue"); ctx.font = "12px system-ui"; ctx.fillText("Nessun dato ancora.", 10, 20); return; }
+  const totali = serie.map((r) => ORDINE_PILA.reduce((s, k) => s + Math.max(0, r.produzione[k] || 0), 0));
+  const max = Math.max(...totali, ...serie.map((r) => r.domanda)) * 1.05 || 1;
+  const sinistra = 42, destra = 8;
+  assi(ctx, w, h, max, 0, sinistra, destra, etichetteX, compatto);
+  const n = serie.length;
+  const X = (i) => sinistra + (w - sinistra - destra) * (n > 1 ? i / (n - 1) : 0);
+  const Y = (v) => 6 + (h - 24) * (1 - v / max);
+  const base = new Array(n).fill(0);
+  for (const k of ORDINE_PILA) {
+    const sopra = serie.map((r, i) => base[i] + Math.max(0, r.produzione[k] || 0));
+    ctx.fillStyle = COLORI_CATEGORIA[k]; ctx.globalAlpha = 0.85; ctx.beginPath();
+    sopra.forEach((v, i) => { if (i) ctx.lineTo(X(i), Y(v)); else ctx.moveTo(X(i), Y(v)); });
+    for (let i = n - 1; i >= 0; i--) ctx.lineTo(X(i), Y(base[i]));
+    ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+    sopra.forEach((v, i) => { base[i] = v; });
+  }
+  ctx.strokeStyle = css("--testo"); ctx.lineWidth = 1.5; ctx.beginPath();
+  serie.forEach((r, i) => { if (i) ctx.lineTo(X(i), Y(r.domanda)); else ctx.moveTo(X(i), Y(r.domanda)); });
+  ctx.stroke();
+  ctx.fillStyle = css("--errore");
+  serie.forEach((r, i) => { const d = r.distacco ?? (r.distacco_mwh ? r.distacco_mwh / 24 : 0); if (d > 1) ctx.fillRect(X(i) - 1.5, 6, 3, h - 30); });
+}
+
+let ultimoStorico = null;
+async function aggiornaStorico() {
+  try { ultimoStorico = await api(`/energia/storico?scala=${S.scala}&massimo=500`); } catch (e) { return; }
+  disegnaGrafici();
+}
+
+function etichetteTempo(serie) {
+  if (S.scala === "giorni") return serie.map((r) => new Date(r.giorno).toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "2-digit" }));
+  return serie.map((r) => new Date(r.t).toLocaleString("it-IT", { day: "2-digit", month: "short", hour: "2-digit" }));
+}
+
+function disegnaGrafici() {
+  $("legenda-produzione").innerHTML = ORDINE_PILA.map((k) => `<i style="--c: ${COLORI_CATEGORIA[k]}">${NOMI_CATEGORIA[k]}</i>`).join("")
+    + `<i style="--c: var(--testo)">domanda MW</i><i style="--c: var(--errore)">carico non servito</i>`;
+  const serie = ultimoStorico ? ultimoStorico.serie : [];
+  const etichette = etichetteTempo(serie);
+  graficoPila($("g-produzione"), serie, etichette);
+  graficoLinee($("g-prezzi"), null, [
+    { valori: serie.map((r) => Math.min(r.prezzo, 500)), colore: css("--accento") },
+    { valori: serie.map((r) => r.prezzo_gas), colore: css("--gas") },
+  ], { etichetteX: etichette });
+  graficoLinee($("g-gas"), null, [
+    { valori: serie.map((r) => r.gas_domanda), colore: css("--gas") },
+    { valori: serie.map((r) => r.stoccaggio_gas * 100), colore: css("--attenzione"), destra: true, max: 100 },
+  ], { etichetteX: etichette });
+}
+
+document.querySelectorAll("button[data-scala]").forEach((b) => b.addEventListener("click", () => {
+  S.scala = b.dataset.scala;
+  document.querySelectorAll("button[data-scala]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  aggiornaStorico();
+}));
+
+/* ------------------------------------------------------------------ comandi */
+
+$("avvia").addEventListener("click", () => post("/energia/controllo", { azione: "avvia", velocita: Number($("velocita").value) }));
+$("pausa").addEventListener("click", () => post("/energia/controllo", { azione: "pausa" }));
+$("passo").addEventListener("click", () => post("/energia/controllo", { azione: "passo", passi: 1 }));
+$("giorno").addEventListener("click", () => {
+  const passoMinuti = (S.dati && S.dati.esecuzione.parametri.passo_minuti) || 60;
+  post("/energia/controllo", { azione: "passo", passi: Math.round(24 * 60 / passoMinuti) });
+});
+$("velocita").addEventListener("change", () => post("/energia/controllo", { azione: "velocita", velocita: Number($("velocita").value) }));
+$("s-tipo").addEventListener("change", () => document.querySelectorAll(".campo.generata").forEach((el) => el.classList.toggle("nascosto", $("s-tipo").value !== "generata")));
+$("crea").addEventListener("click", async () => {
+  const b = $("crea");
+  b.disabled = true; b.textContent = "Creazione…";
+  const corpo = {
+    tipo: $("s-tipo").value, seed: Number($("s-seed").value) || 0,
+    durata_ore: Number($("s-durata").value) * Number($("s-unita").value), passo_minuti: Number($("s-passo").value),
+    inizio: $("s-inizio").value || null, zone: Number($("s-zone").value), citta: Number($("s-citta").value), centrali: Number($("s-centrali").value),
+  };
+  const esito = await post("/energia/scenario", corpo);
+  b.disabled = false; b.textContent = "Crea e sostituisci la simulazione";
+  if (esito) { seleziona(null); ultimoStorico = null; disegnaGrafici(); }
+});
+
+/* ------------------------------------------------------------------ agenti (sistema nervoso) */
+
+const NS = "http://www.w3.org/2000/svg";
+function el(nome, attributi = {}, testo) {
+  const nodo = document.createElementNS(NS, nome);
+  for (const [k, v] of Object.entries(attributi)) nodo.setAttribute(k, v);
+  if (testo !== undefined) nodo.textContent = testo;
+  return nodo;
+}
+
+function disegnaAlbero(nodi) {
+  const svg = $("albero");
+  svg.replaceChildren();
+  S.nodiAlbero = {};
+  if (!nodi.length) return;
+  const perNome = Object.fromEntries(nodi.map((n) => [n.nome, { ...n, figli: [] }]));
+  let radice = null;
+  for (const n of Object.values(perNome)) { if (n.padre && perNome[n.padre]) perNome[n.padre].figli.push(n); else radice = n; }
+  let foglia = 0, profondita = 0;
+  const posiziona = (n, livello) => {
+    profondita = Math.max(profondita, livello); n.livello = livello;
+    if (!n.figli.length) n.x = foglia++;
+    else { n.figli.forEach((c) => posiziona(c, livello + 1)); n.x = (n.figli[0].x + n.figli[n.figli.length - 1].x) / 2; }
+  };
+  posiziona(radice, 0);
+  const L = 116, H = 46, PX = 124, PY = 84;
+  const larghezza = Math.max(foglia * PX, 300), altezza = (profondita + 1) * PY;
+  svg.setAttribute("viewBox", `0 0 ${larghezza} ${altezza}`);
+  const centro = (n) => [n.x * PX + PX / 2 + (larghezza - foglia * PX) / 2, n.livello * PY + H / 2 + 6];
+  const archi = el("g"), gruppo = el("g");
+  const visita = (n, padre) => {
+    const [cx, cy] = centro(n);
+    if (padre) {
+      const [px, py] = centro(padre);
+      const arco = el("path", { class: "arco", d: `M${px},${py + H / 2} C${px},${(py + cy) / 2} ${cx},${(py + cy) / 2} ${cx},${cy - H / 2}` });
+      arco.dataset.a = n.nome.toLowerCase();
+      archi.appendChild(arco);
+    }
+    const g = el("g", { class: "nodo", transform: `translate(${cx - L / 2},${cy - H / 2})` });
+    g.appendChild(el("title", {}, n.leva ? `${n.nome}\nleva: ${n.leva}\npriorità ${n.priorita}` : "Brain: Centro nazionale di controllo"));
+    g.appendChild(el("rect", { width: L, height: H, rx: 9 }));
+    const parole = n.nome === "brain" ? ["Brain", "controllo nazionale"] : [n.nome.split("_")[0], n.nome.split("_").slice(1).join(" ")];
+    g.appendChild(el("text", { x: L / 2, y: 17 }, parole[0]));
+    g.appendChild(el("text", { x: L / 2, y: 30, class: "sotto" }, parole[1].length > 20 ? parole[1].slice(0, 19) + "…" : parole[1]));
+    if (n.leva) {
+      const pallino = el("circle", { cx: 10, cy: 10, r: 4.5, class: "leva-off" });
+      g.appendChild(pallino);
+      g.appendChild(el("text", { x: L / 2, y: 42, class: "sotto" }, `${n.critica ? "⚠ " : ""}prio ${n.priorita}`));
+      S.nodiAlbero[n.nome] = { g, pallino, leva: n.leva };
+    } else {
+      S.nodiAlbero[n.nome] = { g };
+    }
+    gruppo.appendChild(g);
+    n.figli.forEach((c) => visita(c, n));
+  };
+  visita(radice, null);
+  svg.append(archi, gruppo);
+  S.archiAlbero = archi;
+}
+
+function aggiornaAgenti(sn, leve) {
+  if (!sn) return;
+  const etichetta = $("stato-grafo");
+  etichetta.textContent = { pronto: "pronto", in_esecuzione: "sta ragionando", in_attesa_operatore: "attende l'operatore" }[sn.stato] || sn.stato;
+  etichetta.className = "stato-grafo " + sn.stato;
+  $("sveglia").disabled = sn.stato !== "pronto";
+  const ultimoPasso = sn.passi[sn.passi.length - 1];
+  const nodoPausa = sn.stato === "in_attesa_operatore" ? ([...sn.passi].reverse().find((p) => p.tipo === "pausa") || {}).nodo : null;
+  const errore = ultimoPasso && ultimoPasso.tipo === "errore" ? ultimoPasso.nodo : null;
+  for (const [nome, voce] of Object.entries(S.nodiAlbero || {})) {
+    const classi = ["nodo"];
+    if (sn.nodi_visitati.includes(nome)) classi.push("visitato");
+    if (sn.stato === "in_esecuzione" && sn.nodo_attivo === nome) classi.push("attivo");
+    if (nodoPausa === nome) classi.push("pausa");
+    if (errore === nome) classi.push("errore");
+    voce.g.setAttribute("class", classi.join(" "));
+    if (voce.pallino) voce.pallino.setAttribute("class", leve && leve[voce.leva] === "ON" ? "leva-on" : "leva-off");
+  }
+  if (S.archiAlbero) S.archiAlbero.querySelectorAll(".arco").forEach((a) => a.classList.toggle("percorso", sn.nodi_visitati.includes(a.dataset.a)));
+
+  if (document.activeElement !== $("sn-intervallo")) $("sn-intervallo").value = sn.intervallo_minimo_s;
+  if (document.activeElement !== $("sn-massimo")) $("sn-massimo").value = sn.cicli_automatici_massimi;
+  $("sn-automatico").checked = sn.automatico;
+  const info = [`${sn.cicli} cicli (${sn.cicli_automatici}/${sn.cicli_automatici_massimi} automatici)`];
+  if (sn.stimolo_in_attesa) info.push(`stimolo: ${sn.stimolo_in_attesa}`);
+  else if (sn.ultimo_stimolo) info.push(`ultimo stimolo (${sn.ultimo_stimolo.t_simulato}): ${sn.ultimo_stimolo.motivo}`);
+  $("sn-info").textContent = info.join(" · ");
+
+  const hitl = $("hitl");
+  hitl.style.display = sn.stato === "in_attesa_operatore" ? "block" : "none";
+  if (sn.stato === "in_attesa_operatore") {
+    const r = sn.richiesta || {};
+    const testo = r.errore ? `${r.prompt || ""}` : (r.prompt || JSON.stringify(r));
+    if ($("hitl-testo").textContent !== testo) $("hitl-testo").textContent = testo;
+  }
+
+  const firma = sn.passi.length ? `${sn.passi.length}-${ultimoPasso.t_reale}-${ultimoPasso.tipo}-${ultimoPasso.nodo}` : "";
+  if (firma !== S.firmaPassi) {
+    S.firmaPassi = firma;
+    const titoli = { stimolo: "Stimolo", nodo: "", pausa: "In attesa dell'operatore", operatore: "Operatore", errore: "Errore", fine: "Fine del ciclo" };
+    $("passi").innerHTML = sn.passi.length ? sn.passi.slice().reverse().map((p) => {
+      const testa = p.tipo === "nodo" ? `${esc(p.nodo)}${p.prossimo ? ` → ${esc(String(p.prossimo))}` : ""}` : `${titoli[p.tipo] || p.tipo}${p.nodo ? ` (${esc(p.nodo)})` : ""}`;
+      return `<li class="${p.tipo}"><span class="testa">#${p.ciclo} ${testa}</span> <span class="tenue">${esc(p.t_simulato || "")}</span><div class="corpo">${esc(p.testo || (String(p.prossimo).toUpperCase() === "END" ? "Fine del giro: nessuna richiesta da valutare." : `Smista a ${p.prossimo}.`))}</div></li>`;
+    }).join("") : `<li class="tenue">Nessun ciclo eseguito.</li>`;
+  }
+
+  if (leve && S.rete && S.rete.leve) {
+    const veti = (S.dati && S.dati.istantanea.veti) || {};
+    const firmaLeve = JSON.stringify([leve, veti]);
+    if (firmaLeve !== S.firmaLeve) {
+      S.firmaLeve = firmaLeve;
+      $("leve").innerHTML = Object.entries(S.rete.leve).map(([nome, descrizione]) => `
+        <span title="${esc(descrizione)}">${esc(nome)}${veti[nome] ? `<br><span class="tenue">non ${veti[nome].valore_vietato} fino a ${esc(new Date(veti[nome].fino).toLocaleString("it-IT", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }))} (${esc(veti[nome].autore)})</span>` : ""}</span>
+        <span class="riga" style="gap: 6px; flex-wrap: nowrap"><span class="pillola ${leve[nome] === "ON" ? "on" : ""}">${leve[nome]}</span>
+        <button type="button" data-leva="${esc(nome)}" data-valore="${leve[nome] === "ON" ? "OFF" : "ON"}">${leve[nome] === "ON" ? "Spegni" : "Accendi"}</button></span>`).join("");
+    }
+  }
+}
+
+$("sveglia").addEventListener("click", () => post("/energia/sistema-nervoso/ciclo", { motivo: "Ciclo avviato a mano dall'operatore" }));
+$("sn-applica").addEventListener("click", () => post("/energia/sistema-nervoso/configura", {
+  automatico: $("sn-automatico").checked, intervallo_minimo_s: Number($("sn-intervallo").value),
+  cicli_automatici_massimi: Number($("sn-massimo").value), azzera_contatore: true,
+}));
+$("sn-automatico").addEventListener("change", () => post("/energia/sistema-nervoso/configura", { automatico: $("sn-automatico").checked }));
+$("hitl-approva").addEventListener("click", () => post("/energia/sistema-nervoso/decisione", { decisione: "APPROVA", motivazione: "Approvato dalla pagina /energia" }));
+$("hitl-respingi").addEventListener("click", () => post("/energia/sistema-nervoso/decisione", { decisione: "RESPINGI", motivazione: "Respinto dalla pagina /energia" }));
+$("hitl-override").addEventListener("click", () => {
+  const direttiva = $("hitl-direttiva").value.trim();
+  if (!direttiva) { avviso("Per l'Override scrivi prima la direttiva."); return; }
+  post("/energia/sistema-nervoso/decisione", { decisione: "OVERRIDE", motivazione: direttiva });
+});
+$("leve").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-leva]");
+  if (b) post("/energia/leva", { leva: b.dataset.leva, valore: b.dataset.valore });
+});
+
+/* Contorno schematico dell'Italia (longitudine, latitudine), semplificato a mano: solo per orientarsi. */
+const CONTORNO_ITALIA = [
+  [[7.53,43.79],[7.77,43.82],[8.03,43.88],[8.48,44.31],[8.93,44.41],[9.4,44.3],[9.83,44.1],[10.25,43.87],[10.31,43.55],[10.5,42.93],[11.0,42.65],[11.1,42.4],[11.8,42.1],[12.25,41.73],[12.63,41.45],[13.25,41.28],[13.57,41.21],[14.05,40.95],[14.25,40.83],[14.35,40.6],[14.77,40.68],[14.98,40.35],[15.3,40.05],[15.62,40.07],[15.7,39.99],[15.85,39.6],[16.03,39.36],[16.2,38.92],[15.9,38.68],[15.9,38.42],[15.64,38.1],[15.72,37.95],[16.06,37.93],[16.3,38.3],[16.55,38.69],[17.1,38.9],[17.13,39.08],[17.1,39.4],[16.5,39.75],[16.8,40.38],[17.22,40.47],[17.6,40.3],[17.99,40.06],[18.36,39.8],[18.49,40.15],[17.94,40.64],[17.2,40.95],[16.87,41.13],[16.28,41.32],[15.92,41.63],[16.18,41.88],[15.88,41.93],[14.99,42.0],[14.71,42.11],[14.21,42.46],[13.88,42.95],[13.52,43.62],[12.91,43.91],[12.57,44.07],[12.28,44.42],[12.52,44.95],[12.28,45.22],[12.35,45.43],[12.9,45.6],[13.53,45.8],[13.77,45.65],[13.9,45.6],[13.6,46.1],[13.7,46.52],[12.9,46.62],[12.2,46.99],[11.5,47.0],[10.5,46.87],[10.1,46.6],[9.3,46.5],[9.0,45.83],[8.6,46.1],[8.44,46.46],[7.85,45.92],[7.0,45.83],[7.0,45.3],[6.63,45.1],[7.0,44.25]],
+  [[15.55,38.19],[15.65,38.27],[15.24,38.22],[14.02,38.04],[13.36,38.13],[12.88,38.03],[12.5,38.02],[12.44,37.8],[12.59,37.65],[13.08,37.5],[13.58,37.27],[14.25,37.06],[14.85,36.72],[15.13,36.69],[15.29,37.07],[15.22,37.23],[15.09,37.5],[15.29,37.85]],
+  [[9.19,41.24],[9.38,41.18],[9.5,40.92],[9.73,40.57],[9.72,40.38],[9.7,39.93],[9.6,39.44],[9.52,39.14],[9.11,39.2],[9.0,38.97],[8.64,38.87],[8.4,39.0],[8.38,39.2],[8.45,39.9],[8.45,40.3],[8.3,40.56],[8.16,40.56],[8.22,40.95],[8.4,40.84],[8.71,40.91]],
+];
+
+disegnaGrafici();
+avviaFlusso();
+</script>
+</body>
+</html>
