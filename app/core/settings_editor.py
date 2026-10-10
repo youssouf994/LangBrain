@@ -544,7 +544,21 @@ def save(changes: dict[str, Any]) -> dict[str, Any]:
         f = known[fid]
         if f.source == "env":
             os.environ[f.key] = _env_text(f, value)  # effective now; the .env reload of the MAO sees the same value
+    if any(known[fid].source == "env" for fid in values):
+        _notify_model_access()
     return {"saved": sorted(values), "restart": sorted(fid for fid in values if known[fid].restart)}
+
+
+def _notify_model_access() -> None:
+    """
+    The model access object builds its provider clients (keys included) when it reads the environment: tell it that the
+    .env changed, so that a key typed in the settings page is used at the next call, without a restart.
+    """
+    try:
+        from app.MAO.model_access_object import ricarica_env_se_modificato
+        ricarica_env_se_modificato()
+    except Exception:  # never fail a save because of the notification
+        pass
 
 
 def restore_backups() -> list[str]:
@@ -562,4 +576,5 @@ def restore_backups() -> list[str]:
         for key, value in (dotenv_values(env_path()) if env_path().is_file() else {}).items():
             if value is not None and key in {f.key for f in fields() if f.source == "env"}:
                 os.environ[key] = value
+        _notify_model_access()
     return restored

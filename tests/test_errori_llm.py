@@ -216,6 +216,45 @@ class RicaricaEnvTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mao.providers["openrouter"]["model"], "modello-b")
 
 
+class ChiaveDalleImpostazioniTest(unittest.IsolatedAsyncioTestCase):
+    """Una chiave scritta dalla pagina delle impostazioni vale alla chiamata successiva, senza riavviare."""
+
+    def setUp(self):
+        self._cartella = tempfile.TemporaryDirectory()
+        self.addCleanup(self._cartella.cleanup)
+        self.file_env = os.path.join(self._cartella.name, ".env")
+        self.enterContext(patch.dict(os.environ, {"MISTRAL_API_KEY": "", "LANGBRAIN_ENV_FILE": self.file_env}))
+        self.enterContext(patch.object(modulo_mao, "_snapshot_env", {}))
+        self.enterContext(patch.object(modulo_mao, "_ultimo_mtime_env", None))
+
+    async def test_la_chiave_salvata_dalle_impostazioni_abilita_il_provider(self):
+        from app.core import settings_editor
+        with open(self.file_env, "w") as f:
+            f.write("DEFAULT_PROVIDER=mistral\n")
+        self.enterContext(patch.object(modulo_mao, "_PERCORSO_ENV", self.file_env))
+        mao = Mao()
+        self.addAsyncCleanup(mao.aclose)
+        self.assertFalse(mao.providers["mistral"]["enabled"])
+
+        settings_editor.save({"env:MISTRAL_API_KEY": "chiave-di-prova-1234567890"})
+        await mao._aggiorna_configurazione_se_cambiata()
+
+        self.assertTrue(mao.providers["mistral"]["enabled"])
+
+    async def test_un_env_creato_dopo_l_avvio_viene_trovato(self):
+        from app.core import settings_editor
+        self.enterContext(patch.object(modulo_mao, "_PERCORSO_ENV", ""))  # all'avvio non c'era alcun .env
+        mao = Mao()
+        self.addAsyncCleanup(mao.aclose)
+        self.assertFalse(mao.providers["mistral"]["enabled"])
+
+        settings_editor.save({"env:MISTRAL_API_KEY": "chiave-di-prova-1234567890"})  # crea il file
+        await mao._aggiorna_configurazione_se_cambiata()
+
+        self.assertEqual(modulo_mao._PERCORSO_ENV, self.file_env)
+        self.assertTrue(mao.providers["mistral"]["enabled"])
+
+
 class AskBrainTest(unittest.IsolatedAsyncioTestCase):
     def crea_agente(self):
         class Agente(BaseAgent):

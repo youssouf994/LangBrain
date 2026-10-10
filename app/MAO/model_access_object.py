@@ -32,7 +32,12 @@ _ultimo_mtime_env = _mtime_env()
 
 def ricarica_env_se_modificato() -> bool:
     """Applica a os.environ le variabili cambiate nel file .env dall'ultima lettura. True se ce ne sono."""
-    global _snapshot_env, _generazione_env, _ultimo_mtime_env
+    global _PERCORSO_ENV, _snapshot_env, _generazione_env, _ultimo_mtime_env
+    if not _PERCORSO_ENV:
+        # Nessun .env all'avvio: può essere stato creato dopo (es. dalla pagina delle impostazioni, anche da un altro processo).
+        trovato = os.getenv("LANGBRAIN_ENV_FILE") or find_dotenv()
+        if trovato:
+            _PERCORSO_ENV = trovato
     mtime = _mtime_env()
     if mtime is None or mtime == _ultimo_mtime_env:
         return False
