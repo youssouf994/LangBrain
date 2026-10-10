@@ -40,7 +40,7 @@ SUGGERIMENTI = {
     "CHIAVE_NON_VALIDA": "Il provider ha rifiutato la chiave API: verifica o sostituisci la chiave nel file .env.",
     "CHIAVE_NON_CONFIGURATA": "Nessuna chiave API utilizzabile per il provider scelto: impostala nel file .env.",
     "LIMITE_RICHIESTE": "Il provider ha raggiunto il limite di richieste: attendi qualche minuto, usa una tua chiave o cambia modello.",
-    "MODELLO_NON_TROVATO": "Il modello indicato non esiste o non è disponibile: correggi il nome del modello nel file .env.",
+    "MODELLO_NON_TROVATO": "Il modello indicato non esiste o non è disponibile: correggi il nome del modello (variabile *_MODEL nel .env o pagina /config, oppure il modello dell'agente).",
     "CONTESTO_SUPERATO": "La richiesta supera il contesto del modello: scegli un modello con contesto più ampio.",
     "RISPOSTA_TRONCATA": "La risposta è stata interrotta dal limite di token: aumenta MAO_MAX_TOKENS_LIMITE o scegli un modello più capiente.",
     "RISPOSTA_VUOTA": "Il modello non ha prodotto testo (spesso i token sono finiti nel ragionamento): aumenta MAO_MAX_TOKENS_MINIMO.",
@@ -56,7 +56,7 @@ SUGGERIMENTI_EN = {
     "CHIAVE_NON_VALIDA": "The provider refused the API key: check or replace the key in the .env file.",
     "CHIAVE_NON_CONFIGURATA": "No usable API key for the chosen provider: set it in the .env file.",
     "LIMITE_RICHIESTE": "The provider reached its request limit: wait a few minutes, use your own key or change model.",
-    "MODELLO_NON_TROVATO": "The model does not exist or is not available: fix the model name in the .env file.",
+    "MODELLO_NON_TROVATO": "The model does not exist or is not available: fix the model name (the *_MODEL variable in .env or the /config page, or the agent's own model).",
     "CONTESTO_SUPERATO": "The request exceeds the model's context: choose a model with a larger context.",
     "RISPOSTA_TRONCATA": "The answer was cut by the token limit: raise MAO_MAX_TOKENS_LIMITE or choose a larger model.",
     "RISPOSTA_VUOTA": "The model produced no text (tokens often went into reasoning): raise MAO_MAX_TOKENS_MINIMO.",
@@ -131,7 +131,9 @@ def classifica_errore(errore: BaseException) -> tuple[str, str]:
         codice = "CREDITI_ESAURITI"
     elif stato == 429:
         codice = "LIMITE_RICHIESTE"
-    elif stato == 404:
+    elif stato == 404 or (stato == 400 and any(k in minuscolo for k in (
+            "invalid model", "invalid_model", "model not found", "model_not_found", "unknown model", "does not exist"))):
+        # Alcuni provider (Mistral, OpenAI-compatibili) segnalano un nome di modello sbagliato con un 400 invece di un 404.
         codice = "MODELLO_NON_TROVATO"
     elif stato == 400 and any(k in minuscolo for k in ("context length", "context_length", "too many tokens", "maximum context")):
         codice = "CONTESTO_SUPERATO"
