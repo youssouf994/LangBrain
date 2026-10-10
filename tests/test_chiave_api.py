@@ -51,10 +51,10 @@ class ChiaveApiTest(unittest.TestCase):
         with self.con_chiave():
             for rotta in app.routes:
                 metodi = getattr(rotta, "methods", None)
-                if not metodi or rotta.path in ("/", "/demo") or not hasattr(rotta, "dependant"):
+                if not metodi or rotta.path in ("/", "/demo", "/energia") or not hasattr(rotta, "dependant"):
                     continue
                 for metodo in metodi - {"HEAD", "OPTIONS"}:
-                    percorso = rotta.path.replace("{device_id}", "x").replace("{agent_name}", "x").replace("{target}", "x")
+                    percorso = rotta.path.replace("{device_id}", "x").replace("{agent_name}", "x").replace("{target}", "x").replace("{entita_id}", "x")
                     self.assertEqual(
                         self.client.request(metodo, percorso).status_code, 401, f"{metodo} {rotta.path} non protetto"
                     )

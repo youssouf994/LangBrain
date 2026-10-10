@@ -215,11 +215,14 @@ LangBrain/
 │   │   └── scenario.py             # Reproducible data scenarios
 │   ├── api/
 │   │   ├── main.py                 # FastAPI REST API (graph, streaming, HITL, agents, effectors, events, statistics)
-│   │   └── settings_routes.py      # Routes of the /config page (read, save, restore, restart)
-│   ├── nodes/                      # Extensions: modules put here plug into the API (empty in the plain framework)
+│   │   ├── settings_routes.py      # Routes of the /config page (read, save, restore, restart)
+│   │   └── energia.py              # /energia/... routes of the energy simulation
+│   ├── nodes/                      # Extensions: modules put here plug into the API (energia.py: the energy simulation)
+│   ├── simulazione/                # Simulated electricity and gas network (engine, scenarios, background run)
 │   ├── static/
 │   │   ├── demo_grafo.html         # "Graph at work" page, served on GET /demo
 │   │   ├── config.html             # Settings page, served on GET /config
+│   │   ├── energia.html            # Page of the simulated energy network, served on GET /energia
 │   │   ├── settings_form.js, common.css   # Form module and theme shared by the pages
 │   │   └── i18n/                   # Page texts in Italian and English
 │   └── checkpointer.py             # Persistent LangGraph checkpointer on SQLite
@@ -232,12 +235,14 @@ LangBrain/
 │   └── medical_homeostasis/        # Example domain: physiological agents and tools
 │       └── demo_medical_homeostasis.py # Physiological homeostasis and pathology resolution
 ├── scripts/
-│   └── scansione_sicurezza.sh      # Secret and dependency scan
+│   ├── scansione_sicurezza.sh      # Secret and dependency scan
+│   └── stress_energia.py           # Load test of the energy simulation
 ├── tests/                          # pytest suite (temporary databases, no real LLM)
 ├── tests_windows/                  # The same tests with Windows-friendly paths, plus those written on Windows
 └── docs/
     ├── HOW_TO_CUSTOMIZE.md / .en.md # Customisation guide, API map, extensions
     ├── PROJECT_STATUS.md / .en.md  # Project status, known limits and roadmap
+    ├── SIMULAZIONE_ENERGIA.md      # Energy network simulation: model, page, API, load test (Italian)
     ├── API_SMOKE_TEST.md           # API smoke test with curl (Bash)
     └── API_SMOKE_TEST_WINDOWS.ps1  # API smoke test for PowerShell
 ```
@@ -274,6 +279,12 @@ Who can do what: API keys have three roles (`tirocinante` read-only, `medico_di_
 2. **Data scenarios (`examples/crea_scenario.py`):** resets a database and creates hierarchy, history and an optional conflict, to try the API by hand (it makes a backup first).
 3. **Smart Home hierarchy (`examples/hierarchical_pattern/demo_hierarchy.py`):** builds the Brain → Organs → Components hierarchy from code and shows the recursive escalation from the door-lock component up to the Brain, which asks for operator approval.
 4. **Medical homeostasis (`examples/medical_homeostasis/demo_medical_homeostasis.py`):** tachycardia (160 BPM) and hypoxia (82% SpO2): the respiratory agent restores saturation to 95%; the severe tachycardia climbs to the Brain and, if rejected, the operator unblocks and the protocol restores 100 BPM.
+
+5. **Simulated energy network (`/energia`):** electricity, gas and storage on plausible data of Italy (or a large generated network for load tests), lasting up to years at an adjustable speed, with failures, gas crises and heat waves. A hierarchy of agents (Brain, electricity and gas organs, four components) works on top of the network, woken by the nervous system when anomalies appear: the agents operate the levers of the network and ask the operator for the measures that stop industry. It is an extension of the core (`app/nodes/energia.py`). Details in [`docs/SIMULAZIONE_ENERGIA.md`](docs/SIMULAZIONE_ENERGIA.md) (Italian).
+   ```bash
+   python -m uvicorn app.api.main:app --port 8765     # then open http://127.0.0.1:8765/energia (settings: /config)
+   python scripts/stress_energia.py --anni 10          # load test without a server
+   ```
 
 Demos 3 and 4 use their own databases (`demo_gerarchia.db`, `demo_medica.db`) and the default LLM provider from `.env`.
 

@@ -212,11 +212,14 @@ LangBrain/
 │   │   └── scenario.py             # Scenari di dati riproducibili
 │   ├── api/
 │   │   ├── main.py                 # API REST FastAPI (grafo, streaming, HITL, agenti, effettori, eventi, statistiche)
-│   │   └── settings_routes.py      # Rotte della pagina /config (leggi, salva, ripristina, riavvia)
-│   ├── nodes/                      # Estensioni: i moduli messi qui si agganciano all'API (vuota nel framework puro)
+│   │   ├── settings_routes.py      # Rotte della pagina /config (leggi, salva, ripristina, riavvia)
+│   │   └── energia.py              # Rotte /energia/... della simulazione energetica
+│   ├── nodes/                      # Estensioni: i moduli messi qui si agganciano all'API (energia.py: la simulazione energetica)
+│   ├── simulazione/                # Rete elettrica e gas simulata (motore, scenari, esecuzione in background)
 │   ├── static/
 │   │   ├── demo_grafo.html         # Pagina "grafo in azione", servita su GET /demo
 │   │   ├── config.html             # Pagina delle impostazioni, servita su GET /config
+│   │   ├── energia.html            # Pagina della rete energetica simulata, servita su GET /energia
 │   │   ├── settings_form.js, common.css   # Modulo del form e tema comuni alle pagine
 │   │   └── i18n/                   # Testi delle pagine in italiano e inglese
 │   └── checkpointer.py             # Checkpointer LangGraph persistente su SQLite
@@ -229,12 +232,14 @@ LangBrain/
 │   └── medical_homeostasis/        # Dominio di esempio: agenti e tool fisiologici
 │       └── demo_medical_homeostasis.py # Omeostasi fisiologica e risoluzione di patologie
 ├── scripts/
-│   └── scansione_sicurezza.sh      # Scansione di segreti e dipendenze
+│   ├── scansione_sicurezza.sh      # Scansione di segreti e dipendenze
+│   └── stress_energia.py           # Prova di carico della simulazione energetica
 ├── tests/                          # Suite pytest (database temporanei, nessun LLM reale)
 ├── tests_windows/                  # Gli stessi test con percorsi adatti a Windows, più quelli scritti su Windows
 └── docs/
     ├── HOW_TO_CUSTOMIZE.md / .en.md # Guida alla personalizzazione, mappatura API, estensioni
     ├── PROJECT_STATUS.md / .en.md  # Stato del progetto, limiti noti e roadmap
+    ├── SIMULAZIONE_ENERGIA.md      # Simulazione della rete energetica: modello, pagina, API, prova di carico
     ├── API_SMOKE_TEST.md           # Smoke test dell'API con curl (Bash)
     └── API_SMOKE_TEST_WINDOWS.ps1  # Smoke test dell'API per PowerShell
 ```
@@ -271,6 +276,12 @@ Chi comanda cosa: le chiavi dell'API hanno tre ruoli (`tirocinante`, `medico_di_
 2. **Scenari di dati (`examples/crea_scenario.py`):** azzera un database e ci crea gerarchia, storico ed eventuale conflitto, per provare l'API a mano (fa prima un backup).
 3. **Gerarchia Smart Home (`examples/hierarchical_pattern/demo_hierarchy.py`):** crea da codice la gerarchia Brain → Organi → Componenti e mostra l'escalation ricorsiva dal componente serratura al Brain, che chiede l'approvazione dell'operatore.
 4. **Omeostasi medica (`examples/medical_homeostasis/demo_medical_homeostasis.py`):** tachicardia (160 BPM) e ipossia (82% SpO2): l'agente respiratorio riporta la saturazione a 95%; la tachicardia severa sale al Brain e, se la respinge, l'operatore sblocca e il protocollo ripristina 100 BPM.
+
+5. **Rete energetica simulata (`/energia`):** elettricità, gas e accumuli su dati plausibili dell'Italia (o su una rete generata grande per le prove di carico), con durata fino ad anni e velocità regolabile, guasti, crisi del gas e ondate di calore. Sopra la rete lavora una gerarchia di agenti (Brain, organi elettrico e gas, quattro componenti) svegliata dal sistema nervoso quando compaiono anomalie: gli agenti azionano le leve della rete e chiedono all'operatore le misure che fermano l'industria. È un'estensione del core (`app/nodes/energia.py`). Dettagli in [`docs/SIMULAZIONE_ENERGIA.md`](docs/SIMULAZIONE_ENERGIA.md).
+   ```bash
+   python -m uvicorn app.api.main:app --port 8765     # poi apri http://127.0.0.1:8765/energia (le impostazioni: /config)
+   python scripts/stress_energia.py --anni 10          # prova di carico senza server
+   ```
 
 Le demo 3 e 4 usano un proprio database (`demo_gerarchia.db`, `demo_medica.db`) e il provider LLM predefinito del `.env`.
 

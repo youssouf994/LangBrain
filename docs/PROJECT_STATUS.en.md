@@ -34,6 +34,7 @@ physical state of the (simulated) devices is in memory, observability is missing
 | Dependencies | Exact versions in `requirements.txt`, complete list in `requirements.lock`; `pip-audit` finds no known vulnerabilities. |
 | Tests | `python -m pytest tests`: temporary databases, no real LLM, the real databases are never touched. Mutation checks on the critical points; real runs with Mistral/OpenRouter/Gemini done by hand during development. |
 | CI and security | `.github/workflows/ci.yml` (tests on Python 3.12 and 3.14, gitleaks, pip-audit), `scripts/scansione_sicurezza.sh`, `SECURITY.md`, `CONTRIBUTING.md`. The CI is written but not yet run on GitHub: the first push will try it. |
+| Energy simulation | Electricity and gas network with storage on plausible data of Italy or on generated networks up to thousands of entities, deterministic for a given seed, lasting up to years at an adjustable speed; page `/energia`, routes `/energia/...`, load test `scripts/stress_energia.py` (10 years of Italy in 24 s with no balance violation). An extension of the core (`app/nodes/energia.py`), tied to its own hierarchy of agents (Brain, two organs, four components) by the nervous system: anomaly → stimulus → graph cycle → levers, with operator approval for the levers that stop industry. See `docs/SIMULAZIONE_ENERGIA.md` (Italian). |
 | Docker | `Dockerfile` and `docker-compose.yml` (SQLite volume, health check, `python -m app.serve` with `LANGBRAIN_WORKERS` workers, tesseract for local OCR redaction). The image could not be built on the development machine (no Docker): try it at first use. |
 
 ## Known limits
@@ -42,6 +43,7 @@ physical state of the (simulated) devices is in memory, observability is missing
   in one process at a time, runtime HITL configuration, simulated effector values, tool switches and the compiled graph
   shared. Not shared: simulated faults, and the single `api_session` thread of the demo graph (runs take turns).
   Plain `python -m uvicorn` is still one process.
+- **The energy simulation is in memory**: its state is lost at restart and lives in the process that runs it (with several workers use only one for `/energia`); network by market zones, without power flows or ramp limits (details in `docs/SIMULAZIONE_ENERGIA.md`).
 - **Physical state of the tools in memory**, not reconciled with the DB at restart; the tools are simulated (no
   hardware, MQTT or webhook adapter).
 - **Unused or unbounded data**: the `readings` table is not populated; `GraphState.reduce_readings` accumulates

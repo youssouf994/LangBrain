@@ -286,10 +286,13 @@ def _in_lingua(definizione: DefinizionePrompt, parte: str, italiano: str) -> str
     return definizione.en.get(parte, italiano) if lingua() == "en" else italiano
 
 
-def prompt_di_sistema(nome: str, riferimenti: str = "") -> str:
-    """Prompt di sistema completo: ruolo in vigore + dati di riferimento + avvertenza + contratto di risposta."""
+def prompt_di_sistema(nome: str, riferimenti: str = "", ruolo_proprio: str | None = None) -> str:
+    """
+    Prompt di sistema completo: ruolo in vigore + dati di riferimento + avvertenza + contratto di risposta.
+    `ruolo_proprio` sostituisce il ruolo in vigore (il dominio di un nodo che porta il suo prompt).
+    """
     definizione = definizioni()[nome]
-    testo = ruolo(nome)
+    testo = ruolo_proprio or ruolo(nome)
     parti = [testo]
     if riferimenti:
         parti.append(riferimenti.strip())
@@ -299,7 +302,10 @@ def prompt_di_sistema(nome: str, riferimenti: str = "") -> str:
     return "\n\n".join(parti)
 
 
-def compila_template(nome: str, **valori: object) -> str:
-    """Messaggio utente dal template in vigore (i segnaposto sono validati quando il template viene letto)."""
+def compila_template(nome: str, template_proprio: str | None = None, **valori: object) -> str:
+    """
+    Messaggio utente dal template in vigore (i segnaposto sono validati quando il template viene letto).
+    `template_proprio` sostituisce il template in vigore (il dominio di un nodo che porta il suo messaggio).
+    """
     definizione = definizioni()[nome]
-    return ruolo(nome).format(**{s: valori.get(s, "") for s in definizione.segnaposto})
+    return (template_proprio or ruolo(nome)).format(**{s: valori.get(s, "") for s in definizione.segnaposto})

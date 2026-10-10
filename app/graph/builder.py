@@ -344,6 +344,8 @@ def traccia_nodo(node_name: str, nodo):
 def build_graph(
     custom_agent_instances: dict[str, Any] | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
+    tools: dict[str, Any] | None = None,
+    brain_options: dict[str, Any] | None = None,
 ):
     """
     Costruisce e compila il grafo con topologia ad albero gerarchico (Padre <-> Figlio)
@@ -351,8 +353,10 @@ def build_graph(
 
     `checkpointer` salva stato e interrupt (in esecuzione reale è quello SQLite di `app.checkpointer`).
     Se omesso si usa un `MemorySaver` volatile, adatto solo a test e demo.
+    `tools` sostituisce gli effettori della smart home per un altro dominio; `brain_options` passa al Brain i target e i
+    prompt del dominio (vedi `BrainAgent`).
     """
-    shared_tools = default_effectors()
+    shared_tools = tools if tools is not None else default_effectors()
 
     if custom_agent_instances is None:
         agent_instances: dict[str, Any] = {}
@@ -371,6 +375,7 @@ def build_graph(
         tools=list(shared_tools.values()),
         sub_agent_names=root_agent_names,
         registered_agent_names=list(agent_instances),
+        **(brain_options or {}),
     )
 
     workflow = StateGraph(GraphState)
