@@ -41,6 +41,13 @@ class ClassificazioneErroriTest(unittest.TestCase):
             with self.subTest(stato=stato):
                 self.assertEqual(classifica_errore(ErroreConStato(stato))[0], atteso)
 
+    def test_un_nome_di_modello_sbagliato_con_stato_400_e_riconosciuto(self):
+        for messaggio in ("Error code: 400 - {'message': 'Invalid model: istral-medium-latest', 'type': 'invalid_model'}",
+                          "The model `gpt-x` does not exist", "model_not_found"):
+            with self.subTest(messaggio=messaggio):
+                self.assertEqual(classifica_errore(ErroreConStato(400, messaggio))[0], "MODELLO_NON_TROVATO")
+        self.assertEqual(classifica_errore(ErroreConStato(400, "richiesta malformata"))[0], "ERRORE_IMPREVISTO")
+
     def test_chiave_errata_di_google_e_riconosciuta_anche_con_stato_400(self):
         errore = ErroreConStato(400, "API key not valid. Please pass a valid API key.")
         self.assertEqual(classifica_errore(errore)[0], "CHIAVE_NON_VALIDA")
