@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import aiosqlite
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.db.database import Database
 from app.graph.orchestrator import BrainAgent
@@ -26,11 +27,11 @@ UNREACHABLE = str(Path(tempfile.gettempdir()) / "langbrain_missing_folder_win" /
 class EventLogErrorsTest(unittest.IsolatedAsyncioTestCase):
     async def test_database_errors_are_raised(self):
         log = EventLog(db_path=UNREACHABLE)
-        with self.assertRaises(aiosqlite.Error):
+        with self.assertRaises(SQLAlchemyError):
             await log.mark_resolved("lampada")
-        with self.assertRaises(aiosqlite.Error):
+        with self.assertRaises(SQLAlchemyError):
             await log.unblock_target("lampada", "prova")
-        with self.assertRaises(aiosqlite.Error):
+        with self.assertRaises(SQLAlchemyError):
             await log.expire_old_control_flags(ttl_minutes=0)
 
 

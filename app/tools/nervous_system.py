@@ -1,9 +1,36 @@
 import logging
-import aiosqlite
 from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import func, insert, literal, select, update
+
+from app.core import archivio
+from app.db import schema
 from app.db.database import DB_PATH
 
 logger = logging.getLogger(__name__)
+
+events = schema.events
+tab_segnali = schema.signals
+node_runs = schema.node_runs
+
+
+def _taglia_utc(**delta) -> datetime:
+    """Istante di `adesso - delta` in UTC senza fuso, confrontabile con la colonna `timestamp`."""
+    return (datetime.now(timezone.utc) - timedelta(**delta)).replace(tzinfo=None, microsecond=0)
+
+
+def _riga(riga) -> dict:
+    """Una riga come dizionario, con il timestamp nel formato storico `YYYY-MM-DD HH:MM:SS`."""
+    dati = dict(riga._mapping)
+    if "timestamp" in dati:
+        dati["timestamp"] = schema.come_testo(dati["timestamp"])
+    return dati
+
+
+def _escalation_non_chiusa():
+    """Condizione: l'azione non è già stata risolta né riconciliata (il `\\_` è un carattere `_` letterale)."""
+    return events.c.action.not_like("RESOLVED\\_%", escape="\\") & events.c.action.not_like("RECONCILED\\_%", escape="\\")
+
 
 class NervousSystem:
     """
@@ -14,50 +41,42 @@ class NervousSystem:
         self.frequency = frequency
         self.db_path = db_path
 
+    def _motore(self):
+        return archivio.motore(self.db_path)
+
     async def get_recent_events(self) -> list[dict]:
         """Recupera gli eventi registrati nella finestra temporale impostata."""
-        cutoff_time = (datetime.now(timezone.utc) - timedelta(minutes=self.frequency)).strftime("%Y-%m-%d %H:%M:%S")
-        
+        cutoff_time = _taglia_utc(minutes=self.frequency)
+
         try:
-            async with aiosqlite.connect(self.db_path, timeout=30) as db:
-                db.row_factory = aiosqlite.Row
-                
-                if "all" in self.target:
-                    query = "SELECT * FROM events WHERE timestamp >= ? ORDER BY timestamp DESC"
-                    params = (cutoff_time,)
-                else:
-                    placeholders = ",".join("?" for _ in self.target)
-                    query = f"SELECT * FROM events WHERE target IN ({placeholders}) AND timestamp >= ? ORDER BY timestamp DESC"
-                    params = (*self.target, cutoff_time)
-                
-                async with db.execute(query, params) as cursor:
-                    rows = await cursor.fetchall()
-                    return [dict(row) for row in rows]
-                    
+            interrogazione = select(events).where(events.c.timestamp >= cutoff_time)
+            if "all" not in self.target:
+                interrogazione = interrogazione.where(events.c.target.in_(self.target))
+            async with self._motore().connect() as db:
+                righe = (await db.execute(interrogazione.order_by(events.c.timestamp.desc()))).all()
+            return [_riga(r) for r in righe]
+
         except Exception as e:
             logger.error(f"Errore durante il recupero degli eventi recenti: {e}")
             raise
 
     async def log_event(
-        self, 
-        actor: str, 
-        action: str, 
-        target: str, 
+        self,
+        actor: str,
+        action: str,
+        target: str,
         old_value: str,
-        new_value: str, 
-        reasoning: str, 
+        new_value: str,
+        reasoning: str,
         escalated: bool = False
     ) -> None:
         """Registra un nuovo evento con old_value e new_value nel DB."""
         try:
-            async with aiosqlite.connect(self.db_path, timeout=30) as db:
-                await db.execute(
-                    """INSERT INTO events (actor, action, target, old_value, new_value, reasoning, escalated) 
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (actor, action, target, str(old_value), str(new_value), reasoning, escalated)
-                )
-                await db.commit()
-                logger.info(f"[NervousSystem] DB Audit -> {actor} su {target}: {old_value} -> {new_value} ({action})")
+            async with self._motore().begin() as db:
+                await db.execute(insert(events).values(
+                    actor=actor, action=action, target=target, old_value=str(old_value), new_value=str(new_value),
+                    reasoning=reasoning, escalated=int(bool(escalated))))
+            logger.info(f"[NervousSystem] DB Audit -> {actor} su {target}: {old_value} -> {new_value} ({action})")
         except Exception as e:
             logger.error(f"Errore durante la registrazione dell'evento su {target}: {e}")
             raise
@@ -74,13 +93,13 @@ class NervousSystem:
                 valore = float(s["value"])
             except (KeyError, TypeError, ValueError):
                 continue
-            righe.append((str(s.get("receptor_id") or s.get("sensor_id")), str(s.get("agent_owner", "")), valore, str(s.get("unit", ""))))
+            righe.append({"receptor_id": str(s.get("receptor_id") or s.get("sensor_id")), "agent_owner": str(s.get("agent_owner", "")),
+                          "value": valore, "unit": str(s.get("unit", ""))})
         if not righe:
             return 0
         try:
-            async with aiosqlite.connect(self.db_path, timeout=30) as db:
-                await db.executemany("INSERT INTO signals (receptor_id, agent_owner, value, unit) VALUES (?, ?, ?, ?)", righe)
-                await db.commit()
+            async with self._motore().begin() as db:
+                await db.execute(insert(tab_segnali), righe)
             return len(righe)
         except Exception as e:
             logger.error(f"Errore durante la registrazione dei segnali: {e}")
@@ -88,15 +107,13 @@ class NervousSystem:
 
     async def get_recent_signals(self, hours: float = 4.0, receptor_id: str | None = None) -> list[dict]:
         """Segnali registrati nelle ultime `hours` ore (più recenti per primi), opzionalmente di un solo recettore."""
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
-        query, params = "SELECT * FROM signals WHERE timestamp >= ?", [cutoff]
+        interrogazione = select(tab_segnali).where(tab_segnali.c.timestamp >= _taglia_utc(hours=hours))
         if receptor_id:
-            query, params = query + " AND receptor_id = ?", params + [receptor_id]
+            interrogazione = interrogazione.where(tab_segnali.c.receptor_id == receptor_id)
         try:
-            async with aiosqlite.connect(self.db_path, timeout=30) as db:
-                db.row_factory = aiosqlite.Row
-                async with db.execute(query + " ORDER BY timestamp DESC, signal_id DESC", params) as cursor:
-                    return [dict(row) for row in await cursor.fetchall()]
+            async with self._motore().connect() as db:
+                righe = (await db.execute(interrogazione.order_by(tab_segnali.c.timestamp.desc(), tab_segnali.c.signal_id.desc()))).all()
+            return [_riga(r) for r in righe]
         except Exception as e:
             logger.error(f"Errore durante il recupero dei segnali: {e}")
             raise
@@ -108,28 +125,26 @@ class NervousSystem:
         (`GET /graph/stats`): un errore qui viene registrato e NON rilanciato, la traccia non deve fermare il grafo.
         """
         try:
-            async with aiosqlite.connect(self.db_path, timeout=30) as db:
-                await db.execute(
-                    "INSERT INTO node_runs (run_id, thread_id, node, started_at, duration_ms, outcome, detail) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (run_id, thread_id, node, started_at, round(duration_ms, 2), outcome[:100], detail[:500]))
-                await db.commit()
+            async with self._motore().begin() as db:
+                await db.execute(insert(node_runs).values(
+                    run_id=run_id, thread_id=thread_id, node=node, started_at=started_at,
+                    duration_ms=round(duration_ms, 2), outcome=outcome[:100], detail=detail[:500]))
         except Exception as e:
             logger.warning(f"Traccia dell'esecuzione del nodo '{node}' non registrata: {e}")
 
     async def get_node_runs(self, hours: float = 24.0, run_id: str | None = None) -> list[dict]:
         """Le esecuzioni dei nodi delle run avviate nelle ultime `hours` ore (o di una sola run), in ordine di esecuzione."""
         try:
-            async with aiosqlite.connect(self.db_path, timeout=30) as db:
-                db.row_factory = aiosqlite.Row
-                if run_id:
-                    query, params = "SELECT * FROM node_runs WHERE run_id = ? ORDER BY run_no", (run_id,)
-                else:
-                    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="seconds")
-                    query = ("SELECT * FROM node_runs WHERE run_id IN (SELECT run_id FROM node_runs GROUP BY run_id "
-                             "HAVING MIN(started_at) >= ?) ORDER BY run_no")
-                    params = (cutoff,)
-                async with db.execute(query, params) as cursor:
-                    return [dict(row) for row in await cursor.fetchall()]
+            if run_id:
+                interrogazione = select(node_runs).where(node_runs.c.run_id == run_id)
+            else:
+                cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="seconds")
+                recenti = (select(node_runs.c.run_id).group_by(node_runs.c.run_id)
+                           .having(func.min(node_runs.c.started_at) >= cutoff))
+                interrogazione = select(node_runs).where(node_runs.c.run_id.in_(recenti))
+            async with self._motore().connect() as db:
+                righe = (await db.execute(interrogazione.order_by(node_runs.c.run_no))).all()
+            return [dict(r._mapping) for r in righe]
         except Exception as e:
             logger.error(f"Errore durante il recupero delle esecuzioni dei nodi: {e}")
             raise
@@ -143,18 +158,15 @@ class NervousSystem:
         Un errore del database viene registrato e rilanciato (come in `log_event`): chi chiama decide se fermarsi.
         """
         try:
-            async with aiosqlite.connect(self.db_path, timeout=30) as db:
+            async with self._motore().begin() as db:
                 result = await db.execute(
-                    """UPDATE events
-                       SET action = 'RESOLVED_' || action, escalated = 0
-                       WHERE target = ? AND escalated = 1
-                         AND action NOT LIKE 'RESOLVED\\_%' ESCAPE '\\' AND action NOT LIKE 'RECONCILED\\_%' ESCAPE '\\'""",
-                    (target,)
-                )
-                await db.commit()
-                if result.rowcount > 0:
-                    logger.info(f"[NervousSystem] Marcate {result.rowcount} escalation come RESOLVED per '{target}'.")
-                return max(result.rowcount, 0)
+                    update(events)
+                    .where(events.c.target == target, events.c.escalated == 1, _escalation_non_chiusa())
+                    .values(action=literal("RESOLVED_") + events.c.action, escalated=0))
+                chiuse = max(result.rowcount, 0)
+            if chiuse > 0:
+                logger.info(f"[NervousSystem] Marcate {chiuse} escalation come RESOLVED per '{target}'.")
+            return chiuse
         except Exception as e:
             logger.error(f"Errore durante il reset degli eventi di escalation per {target}: {e}")
             raise
@@ -166,21 +178,16 @@ class NervousSystem:
         rilanciato: chi chiama non deve sbloccare il dispositivo se lo sblocco non è stato registrato.
         """
         try:
-            async with aiosqlite.connect(self.db_path, timeout=30) as db:
-                await db.execute(
-                    """INSERT INTO events (actor, action, target, old_value, new_value, reasoning, escalated)
-                       VALUES (?, 'UNBLOCKED', ?, 'REJECTED', 'OFF', ?, 0)""",
-                    (actor, target, reasoning)
-                )
+            async with self._motore().begin() as db:
+                await db.execute(insert(events).values(
+                    actor=actor, action="UNBLOCKED", target=target, old_value="REJECTED", new_value="OFF",
+                    reasoning=reasoning, escalated=0))
                 # Invalida anche vecchi eventi di blocco pendenti
                 await db.execute(
-                    """UPDATE events
-                       SET action = 'RESOLVED_' || action, escalated = 0
-                       WHERE target = ? AND (action LIKE 'REJECTED%' OR action LIKE 'FORCE_SHUTDOWN%')""",
-                    (target,)
-                )
-                await db.commit()
-                logger.info(f"[NervousSystem] Target '{target}' sbloccato con successo: {reasoning}")
+                    update(events)
+                    .where(events.c.target == target, events.c.action.like("REJECTED%") | events.c.action.like("FORCE_SHUTDOWN%"))
+                    .values(action=literal("RESOLVED_") + events.c.action, escalated=0))
+            logger.info(f"[NervousSystem] Target '{target}' sbloccato con successo: {reasoning}")
         except Exception as e:
             logger.error(f"Errore durante lo sblocco del target {target}: {e}")
             raise
@@ -190,21 +197,20 @@ class NervousSystem:
         TTL (Time-To-Live) — Marca come 'EXPIRED' tutti gli eventi di blocco/conflitto antecedenti a ttl_minutes.
         Ritorna il numero di eventi scaduti. Un errore del database viene registrato e rilanciato.
         """
-        cutoff_time = (datetime.now(timezone.utc) - timedelta(minutes=ttl_minutes)).strftime("%Y-%m-%d %H:%M:%S")
+        cutoff_time = _taglia_utc(minutes=ttl_minutes)
         try:
-            async with aiosqlite.connect(self.db_path, timeout=30) as db:
+            async with self._motore().begin() as db:
                 result = await db.execute(
-                    """UPDATE events
-                       SET action = 'EXPIRED_' || action, escalated = 0
-                       WHERE timestamp < ? AND (escalated = 1 OR action LIKE 'REJECTED%' OR action LIKE 'FORCE_SHUTDOWN%')
-                       AND action NOT LIKE 'EXPIRED\\_%' ESCAPE '\\' AND action NOT LIKE 'RESOLVED\\_%' ESCAPE '\\'""",
-                    (cutoff_time,)
-                )
-                await db.commit()
+                    update(events)
+                    .where(events.c.timestamp < cutoff_time,
+                           (events.c.escalated == 1) | events.c.action.like("REJECTED%") | events.c.action.like("FORCE_SHUTDOWN%"),
+                           events.c.action.not_like("EXPIRED\\_%", escape="\\"),
+                           events.c.action.not_like("RESOLVED\\_%", escape="\\"))
+                    .values(action=literal("EXPIRED_") + events.c.action, escalated=0))
                 expired_count = result.rowcount
-                if expired_count > 0:
-                    logger.info(f"[NervousSystem] TTL: Scaduti {expired_count} vecchi flag di controllo (> {ttl_minutes} min).")
-                return expired_count
+            if expired_count > 0:
+                logger.info(f"[NervousSystem] TTL: Scaduti {expired_count} vecchi flag di controllo (> {ttl_minutes} min).")
+            return expired_count
         except Exception as e:
             logger.error(f"Errore durante l'applicazione del TTL sui flag: {e}")
             raise

@@ -142,6 +142,36 @@ def _attiva_pragma_sqlite(motore_sqlite: AsyncEngine) -> None:
             cursore.close()
 
 
+def crea_tabelle(connessione_sincrona, metadata) -> None:
+    """Crea le tabelle e gli indici di `metadata` che mancano (da usare con `await conn.run_sync(crea_tabelle, metadata)`)."""
+    metadata.create_all(connessione_sincrona, checkfirst=True)
+
+
+def aggiungi_colonne_mancanti(connessione_sincrona, metadata) -> list[str]:
+    """
+    Migrazione additiva: aggiunge a ogni tabella esistente le colonne che lo schema prevede e il database non ha ancora
+    (un database creato da una versione precedente). Non toglie né cambia mai nulla. Restituisce `tabella.colonna` aggiunte.
+    """
+    from sqlalchemy import inspect
+    from sqlalchemy.schema import CreateColumn
+
+    ispettore = inspect(connessione_sincrona)
+    aggiunte: list[str] = []
+    for tabella in metadata.sorted_tables:
+        if not ispettore.has_table(tabella.name):
+            continue
+        presenti = {c["name"] for c in ispettore.get_columns(tabella.name)}
+        for colonna in tabella.columns:
+            if colonna.name in presenti:
+                continue
+            definizione = CreateColumn(colonna).compile(dialect=connessione_sincrona.dialect)
+            nome_tabella = connessione_sincrona.dialect.identifier_preparer.format_table(tabella)
+            connessione_sincrona.exec_driver_sql(f"ALTER TABLE {nome_tabella} ADD COLUMN {definizione}")
+            aggiunte.append(f"{tabella.name}.{colonna.name}")
+            logger.info("Migrazione DB: aggiunta colonna '%s' a '%s'.", colonna.name, tabella.name)
+    return aggiunte
+
+
 async def chiudi_motori() -> None:
     """Chiude tutti i motori aperti. Sicura da chiamare più volte."""
     motori = list(_motori.values())

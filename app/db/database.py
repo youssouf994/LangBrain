@@ -1,8 +1,11 @@
-import aiosqlite
 import os
 import logging
 
+from sqlalchemy import delete, insert
+
+from app.core import archivio
 from app.core.configurazione import get_configurazione
+from app.db import schema
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +16,8 @@ class Database:
         self.db_path = db_path
 
     async def init_db(self):
-        dirname = os.path.dirname(self.db_path)
+        # Solo per un file SQLite: con un URL (Postgres) non c'è una cartella da creare.
+        dirname = "" if "://" in self.db_path else os.path.dirname(self.db_path)
         if dirname:
             try:
                 os.makedirs(dirname, exist_ok=True)
@@ -22,97 +26,25 @@ class Database:
                 raise
 
         try:
-            async with aiosqlite.connect(self.db_path, timeout=30) as db:
-                from app.core import multiprocesso  # import tardivo: multiprocesso usa DB_PATH di questo modulo
+            async with archivio.motore(self.db_path).begin() as db:
+                # 1-5. Tabelle (eventi / audit log, segnali, esecuzioni dei nodi, stato condiviso) e indici
+                await db.run_sync(archivio.crea_tabelle, schema.metadata)
 
-                await multiprocesso.abilita_wal(db)
-                # 1. Tabella Eventi / Audit Log
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS events (
-                        event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        actor TEXT NOT NULL,
-                        action TEXT NOT NULL,
-                        target TEXT NOT NULL,
-                        old_value TEXT,
-                        new_value TEXT,
-                        reasoning TEXT,
-                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        escalated BOOLEAN DEFAULT 0
-                    )
-                """)
-
-                # 2. Auto-migrazione: aggiunta colonne mancanti se lo schema è obsoleto
-                async with db.execute("PRAGMA table_info(events)") as cursor:
-                    columns = [row[1] for row in await cursor.fetchall()]
-                    if "old_value" not in columns:
-                        logger.info("Migrazione DB: aggiunta colonna 'old_value'...")
-                        await db.execute("ALTER TABLE events ADD COLUMN old_value TEXT")
-                    if "new_value" not in columns:
-                        logger.info("Migrazione DB: aggiunta colonna 'new_value'...")
-                        await db.execute("ALTER TABLE events ADD COLUMN new_value TEXT")
-                
-                # 3. Indice per ricerche veloci
-                await db.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_events_target_ts 
-                    ON events(target, timestamp DESC)
-                """)
-
-                # 4. Tabella Segnali (ex `readings`: letture dei recettori)
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS signals (
-                        signal_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        receptor_id TEXT NOT NULL,
-                        agent_owner TEXT NOT NULL,
-                        value REAL NOT NULL,
-                        unit TEXT NOT NULL,
-                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-
-                # Nome storico della tabella dei segnali: accettato come alias (vuoto e non usato) finché esistono i vecchi test.
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS readings (
-                        reading_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        sensor_id TEXT NOT NULL,
-                        agent_owner TEXT NOT NULL,
-                        value REAL NOT NULL,
-                        unit TEXT NOT NULL,
-                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-
-                # 5. Esecuzioni dei nodi del grafo (traccia per le statistiche di `GET /graph/stats`)
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS node_runs (
-                        run_no INTEGER PRIMARY KEY AUTOINCREMENT,
-                        run_id TEXT NOT NULL,
-                        thread_id TEXT NOT NULL DEFAULT '',
-                        node TEXT NOT NULL,
-                        started_at TEXT NOT NULL,
-                        duration_ms REAL NOT NULL DEFAULT 0,
-                        outcome TEXT NOT NULL,
-                        detail TEXT NOT NULL DEFAULT ''
-                    )
-                """)
-                await db.execute("CREATE INDEX IF NOT EXISTS idx_node_runs_run ON node_runs(run_id, run_no)")
-                await db.execute("CREATE INDEX IF NOT EXISTS idx_node_runs_started ON node_runs(started_at)")
+                # Auto-migrazione: aggiunta colonne mancanti se lo schema è obsoleto
+                await db.run_sync(archivio.aggiungi_colonne_mancanti, schema.metadata)
 
                 # 6. Conflitto dimostrativo: solo se richiesto da configurazione.toml ([demo] conflitto_all_avvio = 1).
                 # Di default il database non riceve dati di prova in automatico.
                 if get_configurazione().demo_conflitto_all_avvio:
                     # Elimina vecchi eventi di test simili per evitare accumuli a ogni riavvio
-                    await db.execute(
-                        "DELETE FROM events WHERE actor = 'agent_security' AND target = 'ac_living_room'"
-                    )
-                    await db.execute("""
-                        INSERT INTO events (actor, action, target, old_value, new_value, reasoning, escalated)
-                        VALUES ('agent_security', 'FORCE_SHUTDOWN', 'ac_living_room', '22.5°C', 'OFF',
-                                'Simulazione: Finestra Aperta!', 0)
-                    """)
+                    await db.execute(delete(schema.events).where(
+                        schema.events.c.actor == "agent_security", schema.events.c.target == "ac_living_room"))
+                    await db.execute(insert(schema.events).values(
+                        actor="agent_security", action="FORCE_SHUTDOWN", target="ac_living_room",
+                        old_value="22.5°C", new_value="OFF", reasoning="Simulazione: Finestra Aperta!", escalated=0))
                     logger.info("Conflitto dimostrativo inserito su 'events' ([demo] conflitto_all_avvio = 1).")
 
-                await db.commit()
-                logger.info("Database SQLite inizializzato.")
+                logger.info("Database inizializzato: %s", archivio.url_mascherato(self.db_path))
 
         except Exception as e:
             logger.error(f"Errore durante l'inizializzazione/migrazione del database: {e}")
