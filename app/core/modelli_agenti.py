@@ -15,8 +15,11 @@ una modifica via API ha effetto immediato e non serve invalidare cache.
 import logging
 from dataclasses import dataclass
 
-import aiosqlite
+from sqlalchemy import delete, func, insert, select
+from sqlalchemy.exc import SQLAlchemyError
 
+from app.core import archivio
+from app.db import schema
 from app.db.database import DB_PATH
 
 logger = logging.getLogger(__name__)
@@ -24,14 +27,8 @@ logger = logging.getLogger(__name__)
 NOME_BRAIN = "Brain"
 ORIGINE_PREDEFINITO = "predefinito"
 
-_CREAZIONE_TABELLA = """
-    CREATE TABLE IF NOT EXISTS agent_models (
-        agent_name TEXT PRIMARY KEY COLLATE NOCASE,
-        provider TEXT NOT NULL,
-        model TEXT,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-"""
+modelli = schema.agent_models
+registro = schema.agents_registry
 
 
 @dataclass(frozen=True)
@@ -51,39 +48,37 @@ def nome_canonico_brain(nome: str) -> str:
 
 
 async def assicura_tabella(db_path: str = DB_PATH) -> None:
-    async with aiosqlite.connect(db_path, timeout=30) as db:
-        await db.execute(_CREAZIONE_TABELLA)
-        await db.commit()
+    async with archivio.motore(db_path).begin() as db:
+        await db.run_sync(lambda c: modelli.create(c, checkfirst=True))
+
+
+def _del_nome(nome: str):
+    """Condizione sul nome dell'agente, senza distinguere maiuscole e minuscole (uguale su SQLite e Postgres)."""
+    return func.lower(modelli.c.agent_name) == nome.casefold()
 
 
 async def imposta_modello(nome: str, provider: str, modello: str | None, db_path: str = DB_PATH) -> None:
     """Imposta (o sostituisce) provider e modello propri dell'agente."""
     await assicura_tabella(db_path)
-    async with aiosqlite.connect(db_path, timeout=30) as db:
-        await db.execute(
-            """INSERT INTO agent_models (agent_name, provider, model) VALUES (?, ?, ?)
-               ON CONFLICT(agent_name) DO UPDATE SET provider = excluded.provider, model = excluded.model,
-               updated_at = CURRENT_TIMESTAMP""",
-            (nome_canonico_brain(nome), provider, modello),
-        )
-        await db.commit()
+    nome = nome_canonico_brain(nome)
+    async with archivio.motore(db_path).begin() as db:
+        await db.execute(delete(modelli).where(_del_nome(nome)))
+        await db.execute(insert(modelli).values(agent_name=nome, provider=provider, model=modello))
 
 
 async def rimuovi_modello(nome: str, db_path: str = DB_PATH) -> bool:
     """Toglie l'impostazione propria: l'agente torna a ereditare. Restituisce False se non ce n'era una."""
     await assicura_tabella(db_path)
-    async with aiosqlite.connect(db_path, timeout=30) as db:
-        risultato = await db.execute("DELETE FROM agent_models WHERE agent_name = ?", (nome,))
-        await db.commit()
+    async with archivio.motore(db_path).begin() as db:
+        risultato = await db.execute(delete(modelli).where(_del_nome(nome)))
         return risultato.rowcount > 0
 
 
 async def leggi_modello(nome: str, db_path: str = DB_PATH) -> tuple[str, str | None] | None:
     """Impostazione propria dell'agente (senza ereditarietà), oppure None."""
     await assicura_tabella(db_path)
-    async with aiosqlite.connect(db_path, timeout=30) as db:
-        async with db.execute("SELECT provider, model FROM agent_models WHERE agent_name = ?", (nome,)) as cursore:
-            riga = await cursore.fetchone()
+    async with archivio.motore(db_path).connect() as db:
+        riga = (await db.execute(select(modelli.c.provider, modelli.c.model).where(_del_nome(nome)))).first()
     return (riga[0], riga[1]) if riga else None
 
 
@@ -94,17 +89,16 @@ async def risolvi_modello(nome: str, db_path: str = DB_PATH) -> ModelloRisolto:
     """
     predefinito = ModelloRisolto(None, None, ORIGINE_PREDEFINITO)
     try:
-        async with aiosqlite.connect(db_path, timeout=30) as db:
+        async with archivio.motore(db_path).connect() as db:
             corrente = nome_canonico_brain(nome)
             visitati: set[str] = set()
             while corrente.casefold() not in visitati:
                 visitati.add(corrente.casefold())
                 try:
-                    async with db.execute(
-                        "SELECT agent_name, provider, model FROM agent_models WHERE agent_name = ?", (corrente,)
-                    ) as cursore:
-                        riga = await cursore.fetchone()
-                except aiosqlite.OperationalError:
+                    riga = (await db.execute(
+                        select(modelli.c.agent_name, modelli.c.provider, modelli.c.model).where(_del_nome(corrente))
+                    )).first()
+                except SQLAlchemyError:
                     return predefinito  # tabella non ancora creata
                 if riga:
                     return ModelloRisolto(riga[1], riga[2], riga[0])
@@ -112,13 +106,11 @@ async def risolvi_modello(nome: str, db_path: str = DB_PATH) -> ModelloRisolto:
                     break
                 padre = None
                 try:
-                    async with db.execute(
-                        "SELECT parent_agent_name FROM agents_registry WHERE name = ?", (corrente,)
-                    ) as cursore:
-                        riga_padre = await cursore.fetchone()
+                    riga_padre = (await db.execute(
+                        select(registro.c.parent_agent_name).where(registro.c.name == corrente))).first()
                     padre = riga_padre[0] if riga_padre else None
-                except aiosqlite.OperationalError:
-                    pass
+                except SQLAlchemyError:
+                    await db.rollback()  # su Postgres un errore invalida la transazione in corso
                 corrente = nome_canonico_brain(padre or NOME_BRAIN)
     except Exception as e:
         logger.warning("[ModelliAgenti] Risoluzione del modello di '%s' non riuscita (%s): uso il predefinito.", nome, e)

@@ -21,12 +21,15 @@ import json
 import logging
 import re
 from typing import Any
-import aiosqlite
+from sqlalchemy import MetaData, delete, select, update
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.agents.agenti_nativi import crea_agente_nativo
 from app.agents.base_agent import BaseAgent
 from app.agents.dynamic_agent import DynamicAgent
+from app.core import archivio
 from app.core.constants import nome_livello
+from app.db import schema
 from app.db.database import DB_PATH
 from app.tools.effectors import default_effectors
 
@@ -37,6 +40,10 @@ NOMI_RISERVATI = {"brain", "end"}
 TARGET_JOLLY = "all"
 # Agenti nativi con logica propria, che non delegano ai figli registrati.
 AGENTI_NATIVI_SENZA_FIGLI = {"agent_climate"}
+
+# Solo la tabella del registro, per la migrazione additiva delle sue colonne.
+_SOLO_REGISTRO = MetaData()
+schema.agents_registry.to_metadata(_SOLO_REGISTRO)
 
 _PATTERN_NOME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 
@@ -173,7 +180,7 @@ def valida_registro(configs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 class AgentRegistry:
     """
     Registro Singleton per il provisioning dinamico di sotto-agenti a N livelli.
-    Memorizza la configurazione degli agenti su SQLite e li istanzia on-demand.
+    Memorizza la configurazione degli agenti nel database (SQLite o Postgres) e li istanzia on-demand.
     """
 
     def __init__(self, db_path: str = DB_PATH):
@@ -183,25 +190,16 @@ class AgentRegistry:
         # validare sulla stessa fotografia del registro e poi sovrapporsi.
         self._lock_scrittura = asyncio.Lock()
 
+    def _motore(self):
+        return archivio.motore(self.db_path)
+
     async def _assicura_tabella(self) -> None:
-        async with aiosqlite.connect(self.db_path, timeout=30) as db:
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS agents_registry (
-                    name TEXT PRIMARY KEY,
-                    level INTEGER NOT NULL DEFAULT 1,
-                    parent_agent_name TEXT,
-                    managed_targets TEXT NOT NULL,
-                    sub_agent_names TEXT,
-                    system_prompt_template TEXT,
-                    conflict_window_minutes INTEGER DEFAULT 30,
-                    priority_weight REAL DEFAULT 1.0,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            await db.commit()
+        async with self._motore().begin() as db:
+            await db.run_sync(lambda c: schema.agents_registry.create(c, checkfirst=True))
+            await db.run_sync(archivio.aggiungi_colonne_mancanti, _SOLO_REGISTRO)
 
     async def init_registry_db(self) -> None:
-        """Inizializza la tabella `agents_registry` su SQLite se non esiste."""
+        """Inizializza la tabella `agents_registry` se non esiste."""
         await self._assicura_tabella()
 
         # Semina l'agente clima di default se la tabella è vuota
@@ -257,32 +255,26 @@ class AgentRegistry:
                 )
             self._verifica_figli_dichiarati(registrata, config.get("sub_agent_names"), normalizzate)
 
-            async with aiosqlite.connect(self.db_path, timeout=30) as db:
+            tab = schema.agents_registry
+            valori = {
+                "level": registrata["level"], "parent_agent_name": registrata["parent_agent_name"],
+                "managed_targets": json.dumps(registrata["managed_targets"]),
+                "sub_agent_names": json.dumps(registrata["sub_agent_names"]),
+                "system_prompt_template": candidata["system_prompt_template"],
+                "conflict_window_minutes": candidata["conflict_window_minutes"],
+                "priority_weight": candidata["priority_weight"],
+            }
+            async with self._motore().begin() as db:
                 await db.execute(
-                    """INSERT INTO agents_registry
-                       (name, level, parent_agent_name, managed_targets, sub_agent_names, system_prompt_template, conflict_window_minutes, priority_weight)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                       ON CONFLICT(name) DO UPDATE SET
-                       level=excluded.level, parent_agent_name=excluded.parent_agent_name,
-                       managed_targets=excluded.managed_targets, sub_agent_names=excluded.sub_agent_names,
-                       system_prompt_template=excluded.system_prompt_template,
-                       conflict_window_minutes=excluded.conflict_window_minutes, priority_weight=excluded.priority_weight""",
-                    (
-                        nome, registrata["level"], registrata["parent_agent_name"],
-                        json.dumps(registrata["managed_targets"]), json.dumps(registrata["sub_agent_names"]),
-                        candidata["system_prompt_template"], candidata["conflict_window_minutes"],
-                        candidata["priority_weight"],
-                    ),
+                    archivio.inserimento(self._motore(), tab).values(name=nome, **valori)
+                    .on_conflict_do_update(index_elements=[tab.c.name], set_=valori)
                 )
                 # Livelli e figli degli altri agenti possono cambiare (es. spostamento di un sottoalbero).
-                await db.executemany(
-                    "UPDATE agents_registry SET level = ?, parent_agent_name = ?, sub_agent_names = ? WHERE name = ?",
-                    [
-                        (c["level"], c["parent_agent_name"], json.dumps(c["sub_agent_names"]), c["name"])
-                        for c in normalizzate if c["name"] != nome
-                    ],
-                )
-                await db.commit()
+                for c in normalizzate:
+                    if c["name"] != nome:
+                        await db.execute(update(tab).where(tab.c.name == c["name"]).values(
+                            level=c["level"], parent_agent_name=c["parent_agent_name"],
+                            sub_agent_names=json.dumps(c["sub_agent_names"])))
 
         self._instances.clear()
         logger.info(
@@ -315,13 +307,13 @@ class AgentRegistry:
                 )
 
     async def _leggi_configs(self) -> list[dict[str, Any]]:
-        async with aiosqlite.connect(self.db_path, timeout=30) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT * FROM agents_registry ORDER BY level ASC, priority_weight DESC") as cursor:
-                righe = await cursor.fetchall()
+        tab = schema.agents_registry
+        async with self._motore().connect() as db:
+            righe = (await db.execute(select(tab).order_by(tab.c.level.asc(), tab.c.priority_weight.desc()))).all()
         configs = []
         for r in righe:
-            item = dict(r)
+            item = dict(r._mapping)
+            item["created_at"] = schema.come_testo(item.get("created_at"))
             item["managed_targets"] = json.loads(item["managed_targets"])
             configs.append(item)
         # I figli non si leggono dalla colonna: derivano sempre da `parent_agent_name`.
@@ -334,7 +326,7 @@ class AgentRegistry:
         """Restituisce le configurazioni di tutti gli agenti registrati."""
         try:
             return await self._leggi_configs()
-        except aiosqlite.OperationalError:
+        except SQLAlchemyError:
             await self._assicura_tabella()
             return await self._leggi_configs()
 
@@ -354,13 +346,12 @@ class AgentRegistry:
 
             restanti = [c for c in configs if c["name"] != name]
             figli_derivati = _calcola_figli(restanti)
-            async with aiosqlite.connect(self.db_path, timeout=30) as db:
-                await db.execute("DELETE FROM agents_registry WHERE name = ?", (name,))
-                await db.executemany(
-                    "UPDATE agents_registry SET sub_agent_names = ? WHERE name = ?",
-                    [(json.dumps(figli_derivati.get(c["name"], [])), c["name"]) for c in restanti],
-                )
-                await db.commit()
+            tab = schema.agents_registry
+            async with self._motore().begin() as db:
+                await db.execute(delete(tab).where(tab.c.name == name))
+                for c in restanti:
+                    await db.execute(update(tab).where(tab.c.name == c["name"]).values(
+                        sub_agent_names=json.dumps(figli_derivati.get(c["name"], []))))
         self._instances.clear()
         return True
 

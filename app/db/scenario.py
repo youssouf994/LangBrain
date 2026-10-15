@@ -24,13 +24,15 @@ Gerarchia dello scenario base:
 
 import logging
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
-import aiosqlite
+from sqlalchemy import delete, func, insert, select, text
 
 from app.agents.agent_registry import AgentRegistry
+from app.core import archivio
 from app.core.modelli_agenti import assicura_tabella as assicura_tabella_modelli, imposta_modello
+from app.db import schema
 from app.db.database import Database
 from app.graph.timer_hitl import GestoreTimerHitl
 from app.MAO.model_access_object import PROVIDER_NOTI, normalizza_provider
@@ -71,10 +73,12 @@ async def azzera_database(db_path: str) -> None:
     eliminate e non solo svuotate: un database con uno schema vecchio o parziale non si potrebbe reinizializzare.
     Vanno ricreate con `Database.init_db()` e gli altri `assicura_tabella`; `crea_scenario` lo fa.
     """
-    async with aiosqlite.connect(db_path, timeout=30) as db:
+    async with archivio.motore(db_path).begin() as db:
         for tabella in TABELLE_DA_SVUOTARE:
-            await db.execute(f"DROP TABLE IF EXISTS {tabella}")
-        await db.commit()
+            if tabella in ('checkpoints', 'writes') and db.dialect.name == 'postgresql':
+                continue  # su Postgres le tabelle del checkpointer hanno altri nomi e le gestisce LangGraph
+            # Nomi fissi della nostra lista (non input esterno); l'identificatore è comunque quotato dal dialetto.
+            await db.execute(text(f"DROP TABLE IF EXISTS {db.dialect.identifier_preparer.quote(tabella)}"))
 
 
 def crea_backup(db_path: str) -> Path | None:
@@ -88,11 +92,10 @@ def crea_backup(db_path: str) -> Path | None:
 
 
 async def _inserisci_evento(db, ore_fa: float, attore, azione, target, precedente, nuovo, motivo, escalated) -> None:
-    await db.execute(
-        """INSERT INTO events (actor, action, target, old_value, new_value, reasoning, timestamp, escalated)
-           VALUES (?, ?, ?, ?, ?, ?, datetime('now', ?), ?)""",
-        (attore, azione, target, precedente, nuovo, motivo, f"-{int(ore_fa * 3600)} seconds", escalated),
-    )
+    quando = schema.adesso_utc() - timedelta(seconds=int(ore_fa * 3600))
+    await db.execute(insert(schema.events).values(
+        actor=attore, action=azione, target=target, old_value=precedente, new_value=nuovo, reasoning=motivo,
+        timestamp=quando, escalated=escalated))
 
 
 async def crea_scenario(
@@ -116,9 +119,8 @@ async def crea_scenario(
     await registro._assicura_tabella()
     await assicura_tabella_modelli(db_path)
     await GestoreTimerHitl(lambda: None, db_path).assicura_tabella()
-    async with aiosqlite.connect(db_path, timeout=30) as db:
-        await db.execute("DELETE FROM events")
-        await db.commit()
+    async with archivio.motore(db_path).begin() as db:
+        await db.execute(delete(schema.events))
 
     if scenario == "vuoto":
         return {"scenario": scenario, "db": db_path, "agenti": [], "eventi": 0, "modelli": {}}
@@ -131,7 +133,7 @@ async def crea_scenario(
     for agente, (provider, modello) in modelli.items():
         await imposta_modello(agente, normalizza_provider(provider), modello, db_path)
 
-    async with aiosqlite.connect(db_path, timeout=30) as db:
+    async with archivio.motore(db_path).begin() as db:
         for evento in STORICO_BASE:
             await _inserisci_evento(db, *evento)
         if scenario == "conflitto_porta":
@@ -144,9 +146,7 @@ async def crea_scenario(
                 db, 1 / 60, "agent_security", "FORCE_SHUTDOWN", "ac_living_room", "22.5°C", "OFF",
                 "Simulazione: finestra aperta!", 0,
             )
-        await db.commit()
-        async with db.execute("SELECT COUNT(*) FROM events") as cursore:
-            eventi = (await cursore.fetchone())[0]
+        eventi = (await db.execute(select(func.count()).select_from(schema.events))).scalar_one()
 
     return {
         "scenario": scenario, "db": db_path, "agenti": [a[0] for a in AGENTI_BASE], "eventi": eventi,

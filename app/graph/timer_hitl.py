@@ -13,7 +13,7 @@ Alla scadenza applica l'azione scelta in configurazione ([hitl] azione_alla_scad
   umano      il grafo resta in pausa e l'API segnala soltanto che il timer è scaduto.
 
 La durata è `max_wait_seconds` di POST /hitl/config se impostato, altrimenti `timer_predefinito_secondi`.
-Le scadenze sono su SQLite, quindi sopravvivono ai riavvii insieme agli interrupt del checkpointer.
+Le scadenze sono nel database (SQLite o Postgres), quindi sopravvivono ai riavvii insieme agli interrupt del checkpointer.
 
 Lo stesso gestore serve anche altri grafi (per esempio quello di un nodo installato): a chi lo crea basta passare il
 grafo, il database, e se servono regole proprie quando il timer è attivo, quanto dura, che cosa fa alla scadenza e
@@ -28,12 +28,14 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-import aiosqlite
+from sqlalchemy import delete, select, update
+from sqlalchemy.exc import SQLAlchemyError
 
-from app.core import multiprocesso
+from app.core import archivio, multiprocesso
 from langgraph.types import Command
 
 from app.core.configurazione import SCADENZA_SISTEMA, SCADENZA_UMANO, get_configurazione
+from app.db import schema
 from app.db.database import DB_PATH
 from app.graph.hitl_config import DECISIONE_SISTEMA, hitl_manager
 
@@ -45,17 +47,9 @@ STATO_ATTESA = "attesa"
 STATO_SCADUTA_IN_ATTESA = "scaduta_in_attesa"
 STATO_ERRORE = "errore"
 
-_CREAZIONE_TABELLA = """
-    CREATE TABLE IF NOT EXISTS hitl_scadenze (
-        thread_id TEXT PRIMARY KEY,
-        interrupt_id TEXT NOT NULL,
-        tipo TEXT,
-        creato_il REAL NOT NULL,
-        scade_il REAL NOT NULL,
-        durata_secondi INTEGER NOT NULL,
-        stato TEXT NOT NULL DEFAULT 'attesa'
-    )
-"""
+scadenze = schema.hitl_scadenze
+_COLONNE = (scadenze.c.interrupt_id, scadenze.c.tipo, scadenze.c.creato_il, scadenze.c.scade_il,
+            scadenze.c.durata_secondi, scadenze.c.stato)
 
 
 def timer_attivo() -> bool:
@@ -104,9 +98,8 @@ class GestoreTimerHitl:
                 yield
 
     async def assicura_tabella(self) -> None:
-        async with aiosqlite.connect(self.db_path, timeout=30) as db:
-            await db.execute(_CREAZIONE_TABELLA)
-            await db.commit()
+        async with archivio.motore(self.db_path).begin() as db:
+            await db.run_sync(lambda c: scadenze.create(c, checkfirst=True))
 
     # ------------------------------------------------------------------ lettura dello stato del grafo
 
@@ -126,17 +119,13 @@ class GestoreTimerHitl:
     # ------------------------------------------------------------------ registrazione e stato
 
     async def _riga(self, thread_id: str):
-        async with aiosqlite.connect(self.db_path, timeout=30) as db:
-            async with db.execute(
-                "SELECT interrupt_id, tipo, creato_il, scade_il, durata_secondi, stato FROM hitl_scadenze WHERE thread_id = ?",
-                (thread_id,),
-            ) as cursore:
-                return await cursore.fetchone()
+        async with archivio.motore(self.db_path).connect() as db:
+            riga = (await db.execute(select(*_COLONNE).where(scadenze.c.thread_id == thread_id))).first()
+        return tuple(riga) if riga else None
 
     async def _elimina(self, thread_id: str) -> None:
-        async with aiosqlite.connect(self.db_path, timeout=30) as db:
-            await db.execute("DELETE FROM hitl_scadenze WHERE thread_id = ?", (thread_id,))
-            await db.commit()
+        async with archivio.motore(self.db_path).begin() as db:
+            await db.execute(delete(scadenze).where(scadenze.c.thread_id == thread_id))
 
     async def sincronizza(self, thread_id: str) -> dict[str, Any]:
         """
@@ -155,13 +144,12 @@ class GestoreTimerHitl:
         if riga is None or riga[0] != interrupt_id:
             ora = self._orologio()
             durata = self._durata()
-            async with aiosqlite.connect(self.db_path, timeout=30) as db:
-                await db.execute(
-                    """INSERT OR REPLACE INTO hitl_scadenze (thread_id, interrupt_id, tipo, creato_il, scade_il, durata_secondi, stato)
-                       VALUES (?, ?, ?, ?, ?, ?, 'attesa')""",
-                    (thread_id, interrupt_id, tipo, ora, ora + durata, durata),
-                )
-                await db.commit()
+            valori = {"interrupt_id": interrupt_id, "tipo": tipo, "creato_il": ora, "scade_il": ora + durata,
+                      "durata_secondi": durata, "stato": STATO_ATTESA}
+            motore = archivio.motore(self.db_path)
+            async with motore.begin() as db:
+                await db.execute(archivio.inserimento(motore, scadenze).values(thread_id=thread_id, **valori)
+                                 .on_conflict_do_update(index_elements=[scadenze.c.thread_id], set_=valori))
             riga = await self._riga(thread_id)
         return self._stato(riga, in_pausa=True, tipo=tipo)
 
@@ -169,7 +157,7 @@ class GestoreTimerHitl:
         """Stato del timer del thread (registra la scadenza se l'interrupt è nuovo)."""
         try:
             return await self.sincronizza(thread_id)
-        except aiosqlite.OperationalError:
+        except SQLAlchemyError:
             await self.assicura_tabella()
             return await self.sincronizza(thread_id)
 
@@ -197,14 +185,11 @@ class GestoreTimerHitl:
 
     async def elenco(self) -> list[dict[str, Any]]:
         """Tutte le richieste in attesa con scadenza registrata, dalla più urgente."""
-        async with aiosqlite.connect(self.db_path, timeout=30) as db:
-            try:
-                async with db.execute(
-                    "SELECT thread_id, interrupt_id, tipo, creato_il, scade_il, durata_secondi, stato FROM hitl_scadenze ORDER BY scade_il"
-                ) as cursore:
-                    righe = await cursore.fetchall()
-            except aiosqlite.OperationalError:
-                return []
+        try:
+            async with archivio.motore(self.db_path).connect() as db:
+                righe = (await db.execute(select(scadenze.c.thread_id, *_COLONNE).order_by(scadenze.c.scade_il))).all()
+        except SQLAlchemyError:
+            return []
         risultato = []
         for thread_id, interrupt_id, tipo, creato, scade, durata, stato_riga in righe:
             voce = self._stato((interrupt_id, tipo, creato, scade, durata, stato_riga), in_pausa=True, tipo=tipo)
@@ -220,15 +205,14 @@ class GestoreTimerHitl:
         """
         if not self._attivo():
             return []
-        async with aiosqlite.connect(self.db_path, timeout=30) as db:
-            try:
-                async with db.execute(
-                    "SELECT thread_id, interrupt_id, durata_secondi FROM hitl_scadenze WHERE stato = ? AND scade_il <= ?",
-                    (STATO_ATTESA, self._orologio()),
-                ) as cursore:
-                    scadute = await cursore.fetchall()
-            except aiosqlite.OperationalError:
-                return []
+        try:
+            async with archivio.motore(self.db_path).connect() as db:
+                scadute = (await db.execute(
+                    select(scadenze.c.thread_id, scadenze.c.interrupt_id, scadenze.c.durata_secondi)
+                    .where(scadenze.c.stato == STATO_ATTESA, scadenze.c.scade_il <= self._orologio())
+                )).all()
+        except SQLAlchemyError:
+            return []
 
         respinti: list[str] = []
         for thread_id, interrupt_id, durata in scadute:
@@ -269,9 +253,8 @@ class GestoreTimerHitl:
         return respinti
 
     async def _imposta_stato(self, thread_id: str, stato: str) -> None:
-        async with aiosqlite.connect(self.db_path, timeout=30) as db:
-            await db.execute("UPDATE hitl_scadenze SET stato = ? WHERE thread_id = ?", (stato, thread_id))
-            await db.commit()
+        async with archivio.motore(self.db_path).begin() as db:
+            await db.execute(update(scadenze).where(scadenze.c.thread_id == thread_id).values(stato=stato))
 
     async def sorveglia(self) -> None:
         """Ciclo di controllo da eseguire come task in background per tutta la vita dell'applicazione."""

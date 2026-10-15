@@ -93,3 +93,38 @@ leases = Table(
     Column("owner", Text, nullable=False),
     Column("expires", Float, nullable=False),
 )
+
+# Registro degli agenti creati a runtime (vedi `app/agents/agent_registry.py`); `managed_targets` e `sub_agent_names` sono JSON in testo.
+agents_registry = Table(
+    "agents_registry", metadata,
+    Column("name", String(255), primary_key=True),
+    Column("level", Integer, nullable=False, server_default=text("1")),
+    Column("parent_agent_name", Text),
+    Column("managed_targets", Text, nullable=False),
+    Column("sub_agent_names", Text),
+    Column("system_prompt_template", Text),
+    Column("conflict_window_minutes", Integer, server_default=text("30")),
+    Column("priority_weight", Float, server_default=text("1.0")),
+    Column("created_at", DateTime, default=adesso_utc, server_default=func.current_timestamp()),
+)
+
+# Modello LLM proprio di un agente (vedi `app/core/modelli_agenti.py`); i nomi si confrontano senza distinguere le maiuscole.
+agent_models = Table(
+    "agent_models", metadata,
+    Column("agent_name", String(255), primary_key=True),
+    Column("provider", Text, nullable=False),
+    Column("model", Text),
+    Column("updated_at", DateTime, default=adesso_utc, server_default=func.current_timestamp()),
+)
+
+# Scadenze dei timer HITL (vedi `app/graph/timer_hitl.py`); gli istanti sono epoche in secondi.
+hitl_scadenze = Table(
+    "hitl_scadenze", metadata,
+    Column("thread_id", String(255), primary_key=True),
+    Column("interrupt_id", Text, nullable=False),
+    Column("tipo", Text),
+    Column("creato_il", Float, nullable=False),
+    Column("scade_il", Float, nullable=False),
+    Column("durata_secondi", Integer, nullable=False),
+    Column("stato", Text, nullable=False, server_default=text("'attesa'")),
+)

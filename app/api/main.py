@@ -1035,24 +1035,21 @@ async def reset_system_state():
     Svuota il database degli eventi, cancella il registro degli agenti dinamici, 
     ripristina la configurazione HITL e resetta lo stato dei tool IoT condivisi.
     """
-    import aiosqlite
+    from sqlalchemy import delete
+    from app.core import archivio
+    from app.db import schema
     from app.db.database import DB_PATH
     from app.graph.hitl_config import hitl_manager
 
-    # 1. Svuota le tabelle SQLite (events, signals, agents_registry)
-    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
-        await db.execute("DELETE FROM events")
-        await db.execute("DELETE FROM signals")
-        await db.execute("DELETE FROM node_runs")
-        await db.execute("DELETE FROM readings")
-        await db.execute("DELETE FROM agents_registry")
-        await db.commit()
+    # 1. Svuota le tabelle del database (events, signals, agents_registry...)
+    async with archivio.motore(DB_PATH).begin() as db:
+        for tabella in (schema.events, schema.signals, schema.node_runs, schema.readings, schema.agents_registry):
+            await db.execute(delete(tabella))
     await assicura_tabella_modelli()
     await gestore_timer.assicura_tabella()
-    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
-        await db.execute("DELETE FROM agent_models")
-        await db.execute("DELETE FROM hitl_scadenze")
-        await db.commit()
+    async with archivio.motore(DB_PATH).begin() as db:
+        await db.execute(delete(schema.agent_models))
+        await db.execute(delete(schema.hitl_scadenze))
     await svuota_checkpoint()
 
     # 2. Resetta HITL manager
