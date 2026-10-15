@@ -21,6 +21,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy import event
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -171,7 +172,13 @@ def crea_tabelle(connessione_sincrona, metadata, tabelle=None) -> None:
     `await conn.run_sync(crea_tabelle, metadata)`. Sicura con più processi che partono insieme.
     """
     _blocca_schema(connessione_sincrona)
-    metadata.create_all(connessione_sincrona, tables=tabelle, checkfirst=True)
+    try:
+        metadata.create_all(connessione_sincrona, tables=tabelle, checkfirst=True)
+    except OperationalError as errore:
+        # SQLite non ha un blocco di schema: un altro processo ha creato la tabella tra il controllo e la creazione.
+        if "already exists" not in str(errore):
+            raise
+        metadata.create_all(connessione_sincrona, tables=tabelle, checkfirst=True)  # ora vede la tabella e crea il resto
 
 
 def aggiungi_colonne_mancanti(connessione_sincrona, metadata) -> list[str]:
