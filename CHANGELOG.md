@@ -36,6 +36,20 @@ routes and the old table are accepted as aliases. `tests/` still imports the old
   same command again (Docker: the process exits and the restart policy brings it back). `GET /config/api/fields` says
   `can_restart` for the key that asks.
 
+### Postgres (or SQLite) behind one layer
+- `DATABASE_URL=postgresql://...` (Scaleway, Supabase, RDS...) moves the whole database to Postgres; without it nothing
+  changes: SQLite in the file `DB_PATH`. `sslmode=` in the URL is understood.
+- Everything goes through `app/core/archivio.py` (SQLAlchemy Core, schema in `app/db/schema.py`): values are always bound
+  parameters, never pasted into SQL, and upserts/types are translated by the dialect. This covers events, signals, node
+  runs, the agent registry, per-agent models, HITL timers, the shared state and leases of the workers, the scenarios and
+  `DELETE /system/reset`. A node asks the archivio for the engine and never writes a connection string.
+- The LangGraph checkpointer uses `AsyncPostgresSaver` on a connection pool when the URL is Postgres.
+- Database errors are now `sqlalchemy.exc.SQLAlchemyError` (no longer `aiosqlite.Error`). Old SQLite files are migrated
+  additively (missing columns are added) as before.
+- Tests on a real Postgres run only with `TEST_DATABASE_URL` set (`tests_windows/test_win_postgres.py`, a throw-away
+  database: its tables are dropped).
+- `requirements.txt` / `requirements.lock`: SQLAlchemy, Alembic, asyncpg, psycopg, `langgraph-checkpoint-postgres`.
+
 ### Several people at once
 - `python -m app.serve` starts the API with several worker processes (`--workers N` or `LANGBRAIN_WORKERS`, default `auto`:
   one per CPU, at most 4; the Docker image uses it). `app/core/multiprocesso.py` shares what lived in the memory of one

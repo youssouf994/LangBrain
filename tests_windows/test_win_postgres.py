@@ -22,7 +22,7 @@ URL = os.getenv("TEST_DATABASE_URL")
 if sys.platform == "win32":  # psycopg asincrono (checkpointer) non funziona con il ProactorEventLoop
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-TABELLE = ("events", "signals", "readings", "node_runs", "runtime_state", "leases",
+TABELLE = ("events", "signals", "readings", "node_runs", "runtime_state", "leases", "agents_registry", "agent_models", "hitl_scadenze",
            "checkpoint_writes", "checkpoint_blobs", "checkpoints", "checkpoint_migrations")
 
 
@@ -108,3 +108,43 @@ class PostgresTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(await saver.aget_tuple(config))
         await checkpointer.svuota_checkpoint()
         self.assertIsNone(await saver.aget_tuple(config))
+
+    async def test_registro_agenti_e_modelli(self):
+        from app.agents.agent_registry import AgentRegistry, AgenteConFigliError
+        from app.core import modelli_agenti
+        reg = AgentRegistry(db_path=URL)
+        await reg.register_agent_config({"name": "organo", "managed_targets": ["a"], "priority_weight": 5})
+        await reg.register_agent_config({"name": "cellula", "parent_agent_name": "organo", "managed_targets": ["a"]})
+        await reg.register_agent_config({"name": "organo", "managed_targets": ["a", "b"], "priority_weight": 7})  # upsert
+        configs = {c["name"]: c for c in await reg.get_all_agent_configs()}
+        self.assertEqual(configs["organo"]["managed_targets"], ["a", "b"])
+        self.assertEqual(configs["organo"]["sub_agent_names"], ["cellula"])
+        self.assertEqual(configs["cellula"]["level"], 2)
+        with self.assertRaises(AgenteConFigliError):
+            await reg.delete_agent("organo")
+        await modelli_agenti.imposta_modello("Organo", "mistral", "m1", URL)
+        await modelli_agenti.imposta_modello("organo", "mistral", "m2", URL)  # stesso nome senza maiuscole: sostituisce
+        self.assertEqual(await modelli_agenti.leggi_modello("ORGANO", URL), ("mistral", "m2"))
+        risolto = await modelli_agenti.risolvi_modello("cellula", URL)  # eredita dal padre
+        self.assertEqual((risolto.model, risolto.origine), ("m2", "organo"))
+        self.assertTrue(await modelli_agenti.rimuovi_modello("organo", URL))
+        self.assertTrue(await reg.delete_agent("cellula"))
+
+    async def test_timer_hitl_e_scenario(self):
+        from app.db import scenario
+        from app.graph.timer_hitl import GestoreTimerHitl
+        gestore = GestoreTimerHitl(lambda: None, URL)
+        await gestore.assicura_tabella()
+        self.assertEqual(await gestore.elenco(), [])
+        self.assertEqual(await gestore.processa_scadute(), [])
+        riepilogo = await scenario.crea_scenario(URL, "conflitto_porta")
+        self.assertEqual(riepilogo["eventi"], 7)
+        self.assertEqual(len(await AgentRegistryLista.leggi(URL)), 6)
+        self.assertEqual((await scenario.crea_scenario(URL, "vuoto"))["eventi"], 0)
+
+
+class AgentRegistryLista:
+    @staticmethod
+    async def leggi(url):
+        from app.agents.agent_registry import AgentRegistry
+        return await AgentRegistry(db_path=url).get_all_agent_configs()

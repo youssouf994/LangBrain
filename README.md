@@ -176,7 +176,7 @@ LangBrain/
 │   ├── agents/
 │   │   ├── base_agent.py           # DNA comune di ogni agente (applica stato, priorità, escalation)
 │   │   ├── dynamic_agent.py        # Agente dinamico configurabile a runtime (Livelli 1..N), una chiamata per ciclo
-│   │   ├── agent_registry.py       # Registro gerarchico su SQLite
+│   │   ├── agent_registry.py       # Registro gerarchico (SQLite o Postgres)
 │   │   ├── agenti_nativi.py        # Carica per nome gli agenti nativi di esempio da examples/
 │   │   └── agent_climate.py, medical_agents.py   # Alias dei vecchi percorsi (ora in examples/)
 │   ├── core/
@@ -208,7 +208,7 @@ LangBrain/
 │   │   ├── statistiche_grafo.py    # Statistiche per i grafici: nodi del grafo e segnali nel tempo
 │   │   └── baseTool.py, sensor_tools.py, event_log.py, tool_wrapper.py, medical_tools.py   # Alias dei vecchi nomi
 │   ├── db/
-│   │   ├── database.py             # Schema SQLite (events, signals, node_runs, ...)
+│   │   ├── database.py             # Schema (SQLite o Postgres: events, signals, node_runs, ...)
 │   │   └── scenario.py             # Scenari di dati riproducibili
 │   ├── api/
 │   │   ├── main.py                 # API REST FastAPI (grafo, streaming, HITL, agenti, effettori, eventi, statistiche)
@@ -219,7 +219,7 @@ LangBrain/
 │   │   ├── config.html             # Pagina delle impostazioni, servita su GET /config
 │   │   ├── settings_form.js, common.css   # Modulo del form e tema comuni alle pagine
 │   │   └── i18n/                   # Testi delle pagine in italiano e inglese
-│   └── checkpointer.py             # Checkpointer LangGraph persistente su SQLite
+│   └── checkpointer.py             # Checkpointer LangGraph persistente (SQLite o Postgres)
 ├── examples/
 │   ├── avvia_demo.py               # Server + scenario di prova + pagina web del grafo
 │   ├── crea_scenario.py            # Azzera un database e crea uno scenario di prova
@@ -248,7 +248,7 @@ LangBrain/
 | Framework Agenti | **LangGraph** | Grafi stateful con cicli, routing condizionale e checkpointing nativo |
 | Provider LLM | **MAO Proxy** | OpenRouter, Google AI Studio (Gemini), Mistral e LLM locali (vLLM, LM Studio), con modello per singolo agente |
 | API Server | **FastAPI** | Server HTTP/REST asincrono 100% headless con Swagger UI interattiva |
-| Database | **SQLite (aiosqlite)** | Zero setup, persistenza audit log eventi, registro agenti e stato |
+| Database | **SQLite** (predefinito) o **Postgres** (`DATABASE_URL`), via SQLAlchemy | Zero setup in locale; Postgres per deploy con filesystem effimero (Scaleway, Supabase...). Persistenza audit log, registro agenti e stato |
 
 ---
 
