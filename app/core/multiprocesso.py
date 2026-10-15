@@ -26,7 +26,10 @@ import uuid
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 import aiosqlite
+from sqlalchemy import delete, select
 
+from app.core import archivio
+from app.db import schema
 from app.db.database import DB_PATH
 
 logger = logging.getLogger(__name__)
@@ -50,19 +53,19 @@ def condiviso() -> bool:
     return lavoratori() > 1 or os.getenv("LANGBRAIN_SHARED_STATE") == "1"
 
 
-async def _connetti(percorso: str | None = None) -> aiosqlite.Connection:
+async def _motore(percorso: str | None = None):
+    """Il motore dell'archivio, con le tabelle di stato e contratti create alla prima volta (una per database)."""
     percorso = percorso or DB_PATH
-    if os.path.dirname(percorso):
-        os.makedirs(os.path.dirname(percorso), exist_ok=True)
-    db = await aiosqlite.connect(percorso, timeout=30)
-    if percorso not in _pronte:
-        await db.execute("PRAGMA journal_mode=WAL")
-        await db.execute("CREATE TABLE IF NOT EXISTS runtime_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, "
-                         "version INTEGER NOT NULL DEFAULT 1, updated_at REAL NOT NULL)")
-        await db.execute("CREATE TABLE IF NOT EXISTS leases (name TEXT PRIMARY KEY, owner TEXT NOT NULL, expires REAL NOT NULL)")
-        await db.commit()
-        _pronte.add(percorso)
-    return db
+    motore = archivio.motore(percorso)
+    chiave = archivio.url_database(percorso)
+    if chiave not in _pronte:
+        dirname = "" if "://" in (percorso or "") else os.path.dirname(percorso or "")
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
+        async with motore.begin() as db:
+            await db.run_sync(lambda c: schema.metadata.create_all(c, tables=[schema.runtime_state, schema.leases], checkfirst=True))
+        _pronte.add(chiave)
+    return motore
 
 
 async def abilita_wal(db: aiosqlite.Connection) -> None:
@@ -74,71 +77,60 @@ async def abilita_wal(db: aiosqlite.Connection) -> None:
 # ------------------------------------------------------------------------------------------ stato condiviso
 
 async def leggi(chiave: str, default: Any = None, percorso: str | None = None) -> Any:
-    db = await _connetti(percorso)
-    try:
-        async with db.execute("SELECT value FROM runtime_state WHERE key = ?", (chiave,)) as cursor:
-            riga = await cursor.fetchone()
-    finally:
-        await db.close()
+    motore = await _motore(percorso)
+    async with motore.connect() as db:
+        riga = (await db.execute(select(schema.runtime_state.c.value).where(schema.runtime_state.c.key == chiave))).first()
     return default if riga is None else json.loads(riga[0])
 
 
 async def scrivi(chiave: str, valore: Any, percorso: str | None = None) -> int:
     """Scrive il valore e restituisce la nuova versione (cresce a ogni scrittura)."""
-    db = await _connetti(percorso)
-    try:
-        await db.execute(
-            "INSERT INTO runtime_state (key, value, version, updated_at) VALUES (?, ?, 1, ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, version = version + 1, updated_at = excluded.updated_at",
-            (chiave, json.dumps(valore, default=str), time.time()))
-        await db.commit()
-        async with db.execute("SELECT version FROM runtime_state WHERE key = ?", (chiave,)) as cursor:
-            return (await cursor.fetchone())[0]
-    finally:
-        await db.close()
+    motore = await _motore(percorso)
+    tabella = schema.runtime_state
+    inserimento = archivio.inserimento(motore, tabella).values(
+        key=chiave, value=json.dumps(valore, default=str), version=1, updated_at=time.time())
+    inserimento = inserimento.on_conflict_do_update(
+        index_elements=[tabella.c.key],
+        set_={"value": inserimento.excluded.value, "version": tabella.c.version + 1, "updated_at": inserimento.excluded.updated_at},
+    ).returning(tabella.c.version)
+    async with motore.begin() as db:
+        return (await db.execute(inserimento)).scalar_one()
 
 
 async def versioni(*chiavi: str, percorso: str | None = None) -> dict[str, int]:
     """La versione di ciascuna chiave (0 se non è mai stata scritta)."""
-    db = await _connetti(percorso)
-    try:
-        segnaposto = ",".join("?" for _ in chiavi)
-        async with db.execute(f"SELECT key, version FROM runtime_state WHERE key IN ({segnaposto})", chiavi) as cursor:
-            trovate = dict(await cursor.fetchall())
-    finally:
-        await db.close()
+    motore = await _motore(percorso)
+    tabella = schema.runtime_state
+    async with motore.connect() as db:
+        trovate = dict((await db.execute(select(tabella.c.key, tabella.c.version).where(tabella.c.key.in_(chiavi)))).all())
     return {c: trovate.get(c, 0) for c in chiavi}
 
 
 # ------------------------------------------------------------------------------------------ contratti (leader e blocchi)
 
 async def _acquisisci(nome: str, proprietario: str, durata: float, percorso: str | None = None) -> bool:
-    """Prende (o rinnova) il contratto `nome` se è libero, scaduto o già nostro."""
-    db = await _connetti(percorso)
-    try:
-        await db.execute("BEGIN IMMEDIATE")
-        adesso = time.time()
-        async with db.execute("SELECT owner, expires FROM leases WHERE name = ?", (nome,)) as cursor:
-            riga = await cursor.fetchone()
-        if riga is None or riga[1] <= adesso or riga[0] == proprietario:
-            await db.execute("INSERT INTO leases (name, owner, expires) VALUES (?, ?, ?) "
-                             "ON CONFLICT(name) DO UPDATE SET owner = excluded.owner, expires = excluded.expires",
-                             (nome, proprietario, adesso + durata))
-            await db.commit()
-            return True
-        await db.rollback()
-        return False
-    finally:
-        await db.close()
+    """
+    Prende (o rinnova) il contratto `nome` se è libero, scaduto o già nostro. Un'unica istruzione atomica: inserisce il
+    contratto, oppure lo riscrive solo se è scaduto o già nostro (e in tal caso restituisce la riga); se è di un altro e
+    ancora valido non cambia nulla e non restituisce nulla. Vale uguale su SQLite e su Postgres, senza transazioni esplicite.
+    """
+    motore = await _motore(percorso)
+    tabella = schema.leases
+    adesso = time.time()
+    inserimento = archivio.inserimento(motore, tabella).values(name=nome, owner=proprietario, expires=adesso + durata)
+    inserimento = inserimento.on_conflict_do_update(
+        index_elements=[tabella.c.name],
+        set_={"owner": inserimento.excluded.owner, "expires": inserimento.excluded.expires},
+        where=(tabella.c.expires <= adesso) | (tabella.c.owner == proprietario),
+    ).returning(tabella.c.name)
+    async with motore.begin() as db:
+        return (await db.execute(inserimento)).first() is not None
 
 
 async def _rilascia(nome: str, proprietario: str, percorso: str | None = None) -> None:
-    db = await _connetti(percorso)
-    try:
-        await db.execute("DELETE FROM leases WHERE name = ? AND owner = ?", (nome, proprietario))
-        await db.commit()
-    finally:
-        await db.close()
+    motore = await _motore(percorso)
+    async with motore.begin() as db:
+        await db.execute(delete(schema.leases).where(schema.leases.c.name == nome, schema.leases.c.owner == proprietario))
 
 
 async def compito_leader(nome: str, fabbrica: Callable[[], Awaitable[None]], durata: float = DURATA_CONTRATTO_SECONDI,

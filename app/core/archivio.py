@@ -142,6 +142,18 @@ def _attiva_pragma_sqlite(motore_sqlite: AsyncEngine) -> None:
             cursore.close()
 
 
+def inserimento(motore_db: AsyncEngine, tabella):
+    """
+    Un `INSERT` che supporta `on_conflict_do_update` / `on_conflict_do_nothing` / `returning`, nella variante del DBMS del
+    motore (SQLite e Postgres hanno la stessa interfaccia, ma classi diverse).
+    """
+    if motore_db.dialect.name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert
+    else:
+        from sqlalchemy.dialects.sqlite import insert
+    return insert(tabella)
+
+
 def crea_tabelle(connessione_sincrona, metadata) -> None:
     """Crea le tabelle e gli indici di `metadata` che mancano (da usare con `await conn.run_sync(crea_tabelle, metadata)`)."""
     metadata.create_all(connessione_sincrona, checkfirst=True)
