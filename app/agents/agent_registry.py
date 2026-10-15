@@ -195,7 +195,7 @@ class AgentRegistry:
 
     async def _assicura_tabella(self) -> None:
         async with self._motore().begin() as db:
-            await db.run_sync(lambda c: schema.agents_registry.create(c, checkfirst=True))
+            await db.run_sync(archivio.crea_tabelle, schema.metadata, [schema.agents_registry])
             await db.run_sync(archivio.aggiungi_colonne_mancanti, _SOLO_REGISTRO)
 
     async def init_registry_db(self) -> None:

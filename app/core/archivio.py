@@ -154,9 +154,24 @@ def inserimento(motore_db: AsyncEngine, tabella):
     return insert(tabella)
 
 
-def crea_tabelle(connessione_sincrona, metadata) -> None:
-    """Crea le tabelle e gli indici di `metadata` che mancano (da usare con `await conn.run_sync(crea_tabelle, metadata)`)."""
-    metadata.create_all(connessione_sincrona, checkfirst=True)
+# Chiave del blocco di Postgres che serializza le creazioni di tabelle tra processi (valore qualunque, fisso).
+_CHIAVE_BLOCCO_SCHEMA = 7_361_204_001
+
+
+def _blocca_schema(connessione_sincrona) -> None:
+    """Su Postgres: blocco fino a fine transazione, così due processi non creano la stessa tabella insieme (altrimenti
+    `CREATE TABLE` fallisce con `pg_type_typname_nsp_index`). SQLite serializza da sé."""
+    if connessione_sincrona.dialect.name == "postgresql":
+        connessione_sincrona.exec_driver_sql(f"SELECT pg_advisory_xact_lock({_CHIAVE_BLOCCO_SCHEMA})")
+
+
+def crea_tabelle(connessione_sincrona, metadata, tabelle=None) -> None:
+    """
+    Crea le tabelle e gli indici di `metadata` (o solo `tabelle`) che mancano; da usare con
+    `await conn.run_sync(crea_tabelle, metadata)`. Sicura con più processi che partono insieme.
+    """
+    _blocca_schema(connessione_sincrona)
+    metadata.create_all(connessione_sincrona, tables=tabelle, checkfirst=True)
 
 
 def aggiungi_colonne_mancanti(connessione_sincrona, metadata) -> list[str]:
@@ -167,6 +182,7 @@ def aggiungi_colonne_mancanti(connessione_sincrona, metadata) -> list[str]:
     from sqlalchemy import inspect
     from sqlalchemy.schema import CreateColumn
 
+    _blocca_schema(connessione_sincrona)
     ispettore = inspect(connessione_sincrona)
     aggiunte: list[str] = []
     for tabella in metadata.sorted_tables:

@@ -109,6 +109,14 @@ class PostgresTest(unittest.IsolatedAsyncioTestCase):
         await checkpointer.svuota_checkpoint()
         self.assertIsNone(await saver.aget_tuple(config))
 
+    async def test_piu_processi_che_creano_le_tabelle_insieme(self):
+        # Regressione trovata in Docker con 3 worker: CREATE TABLE concorrenti davano pg_type_typname_nsp_index.
+        from app.agents.agent_registry import AgentRegistry
+        from app.core import modelli_agenti
+        await asyncio.gather(*[Database(URL).init_db() for _ in range(6)],
+                             *[AgentRegistry(db_path=URL)._assicura_tabella() for _ in range(6)],
+                             *[modelli_agenti.assicura_tabella(URL) for _ in range(6)])
+
     async def test_registro_agenti_e_modelli(self):
         from app.agents.agent_registry import AgentRegistry, AgenteConFigliError
         from app.core import modelli_agenti

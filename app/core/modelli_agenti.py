@@ -49,7 +49,7 @@ def nome_canonico_brain(nome: str) -> str:
 
 async def assicura_tabella(db_path: str = DB_PATH) -> None:
     async with archivio.motore(db_path).begin() as db:
-        await db.run_sync(lambda c: modelli.create(c, checkfirst=True))
+        await db.run_sync(archivio.crea_tabelle, schema.metadata, [modelli])
 
 
 def _del_nome(nome: str):

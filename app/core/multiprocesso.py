@@ -63,7 +63,7 @@ async def _motore(percorso: str | None = None):
         if dirname:
             os.makedirs(dirname, exist_ok=True)
         async with motore.begin() as db:
-            await db.run_sync(lambda c: schema.metadata.create_all(c, tables=[schema.runtime_state, schema.leases], checkfirst=True))
+            await db.run_sync(archivio.crea_tabelle, schema.metadata, [schema.runtime_state, schema.leases])
         _pronte.add(chiave)
     return motore
 

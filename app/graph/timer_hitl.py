@@ -99,7 +99,7 @@ class GestoreTimerHitl:
 
     async def assicura_tabella(self) -> None:
         async with archivio.motore(self.db_path).begin() as db:
-            await db.run_sync(lambda c: scadenze.create(c, checkfirst=True))
+            await db.run_sync(archivio.crea_tabelle, schema.metadata, [scadenze])
 
     # ------------------------------------------------------------------ lettura dello stato del grafo
 
