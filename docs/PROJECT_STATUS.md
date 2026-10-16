@@ -48,7 +48,7 @@ LangBrain è un boilerplate funzionante per sistemi di agenti gerarchici su Lang
   servizio, nessun port-forward) la suite passa intera (530 passati, 0 falliti in 79 s, anche con `--cpus 1`), e la CI su GitHub non l'ha
   mai visto. Per riprodurlo: `docker run --add-host host.docker.internal:host-gateway -e TEST_PG_URL=postgresql://postgres:prova@host.docker.internal:55433/langbrain_test <immagine> python -m pytest tests`
   con Docker Desktop già carico; per evitarlo: `docker network create n`, Postgres e test sulla stessa rete e URL con il nome del container.
-- **Suite Windows, 11 fallimenti `WinError 32` noti**: vedi `tests_windows/README.md` (causa e test).
+- **Suite Windows**: nessun fallimento noto. Gli 11 `WinError 32` di prima erano dei test (`with sqlite3.connect(...)` non chiude il file) e sono corretti con `connetti` di `tests/sqlite_chiusura.py`; dettagli in `tests_windows/README.md`.
 - **Override**: la traduzione della direttiva in comandi è affidata all'LLM; ogni comando passa comunque dall'elenco dei dispositivi ammessi e viene tracciato nell'audit log con `actor: "Brain_Override"`.
 
 ## Dipendenze e configurazione

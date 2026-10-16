@@ -12,7 +12,7 @@ gerarchia, agenti medici, override); le funzionalità più recenti hanno i propr
 import asyncio
 import json
 import os
-import sqlite3
+from sqlite_chiusura import connetti
 import sys
 import tempfile
 import unittest
@@ -71,7 +71,7 @@ class BaseTest(unittest.IsolatedAsyncioTestCase):
         return agente
 
     def righe(self, sql, *parametri):
-        with sqlite3.connect(self.db) as db:
+        with connetti(self.db) as db:
             return db.execute(sql, parametri).fetchall()
 
 
@@ -126,13 +126,13 @@ class DatabaseTest(BaseTest):
 
     async def test_un_database_con_lo_schema_vecchio_viene_migrato(self):
         vecchio = os.path.join(self._cartella.name, "vecchio.db")
-        with sqlite3.connect(vecchio) as db:
+        with connetti(vecchio) as db:
             db.execute("""CREATE TABLE events (event_id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL,
                           target TEXT NOT NULL, reasoning TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, escalated BOOLEAN DEFAULT 0)""")
 
         await Database(vecchio).init_db()
 
-        with sqlite3.connect(vecchio) as db:
+        with connetti(vecchio) as db:
             colonne = {r[1] for r in db.execute("PRAGMA table_info(events)")}
         self.assertTrue({"old_value", "new_value"} <= colonne)
 

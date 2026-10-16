@@ -92,6 +92,12 @@ routes and the old table are accepted as aliases. `tests/` still imports the old
   `leggi_chiusa`) and an `APPROVAL_EXPIRED` event so a late decision is `already_closed`; device description with limits,
   `online`, `last_seen` (`app/core/dispositivi.py`); health pieces (`app/core/salute.py`); missing `old_value`/`new_value` are
   stored as NULL.
+- **Model keys and invalid model names** (taken from the energy branch): a key saved from the settings page is used at the next model
+  call (the MAO rebuilds its clients), also when the `.env` did not exist at start; a 400 `invalid_model` is classified as
+  `MODELLO_NON_TROVATO` with a suggestion that points to `/config`.
+- **`notify-nodes.yml` removed**: the core does not notify anyone; a node syncs on its own schedule (`scripts/core_sync.py`).
+- **Tests on Windows**: `with sqlite3.connect(...)` in the tests is replaced by `connetti` (`tests/sqlite_chiusura.py`), which closes the
+  connection on exit: the 11 known `WinError 32` failures are gone. Nothing changes on Linux.
 - **`DATABASE_URL`** is no longer read; if it is set and `LANGBRAIN_DB_URL` is not, the start logs a clear warning saying which
   variables to use (no silent fallback: the database stays SQLite).
 - **CI on GitHub**: SQLite on Python 3.12 and 3.14, the whole suite on Postgres 16, Docker image build with startup, gitleaks

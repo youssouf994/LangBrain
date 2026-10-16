@@ -1,5 +1,5 @@
 import os
-import sqlite3
+from sqlite_chiusura import connetti
 import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -87,7 +87,7 @@ class CheckpointerPersistenteTest(unittest.IsolatedAsyncioTestCase):
         await apri_checkpointer(self.percorso_db)
         await chiudi_checkpointer()
 
-        with sqlite3.connect(self.percorso_db) as db:
+        with connetti(self.percorso_db) as db:
             tabelle = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         self.assertTrue({"checkpoints", "writes"} <= tabelle)
 

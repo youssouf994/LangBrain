@@ -1,5 +1,5 @@
 import os
-import sqlite3
+from sqlite_chiusura import connetti
 import subprocess
 import sys
 import tempfile
@@ -25,7 +25,7 @@ class ScenarioTest(unittest.IsolatedAsyncioTestCase):
         self.db = os.path.join(self._cartella.name, "scenario.db")
 
     def conta(self, tabella):
-        with sqlite3.connect(self.db) as db:
+        with connetti(self.db) as db:
             return db.execute(f"SELECT COUNT(*) FROM {tabella}").fetchone()[0]
 
     async def test_lo_scenario_base_crea_la_gerarchia_e_lo_storico(self):
@@ -109,7 +109,7 @@ class ScenarioTest(unittest.IsolatedAsyncioTestCase):
         await crea_scenario(self.db, "base")
 
         self.assertEqual((self.conta("events"), self.conta("agents_registry")), (6, 6))
-        with sqlite3.connect(self.db) as db:
+        with connetti(self.db) as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM events WHERE action = 'residuo'").fetchone()[0], 0)
             # i checkpoint vecchi non sopravvivono (la tabella viene ricreata dal checkpointer all'avvio)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM sqlite_master WHERE name = 'checkpoints'").fetchone()[0], 0)
@@ -120,11 +120,11 @@ class ScenarioTest(unittest.IsolatedAsyncioTestCase):
             await db.execute("INSERT INTO events (actor) VALUES ('x')")
             await db.commit()
         await azzera_database(self.db)
-        with sqlite3.connect(self.db) as db:
+        with connetti(self.db) as db:
             self.assertEqual(db.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall(), [])
 
     async def test_un_database_con_schema_vecchio_viene_ricreato_da_capo(self):
-        with sqlite3.connect(self.db) as db:
+        with connetti(self.db) as db:
             db.execute("CREATE TABLE events (event_id INTEGER PRIMARY KEY, actor TEXT NOT NULL)")
             db.execute("CREATE TABLE agents_registry (name TEXT PRIMARY KEY)")
             db.execute("INSERT INTO agents_registry VALUES ('vecchio')")
@@ -161,7 +161,7 @@ class ScriptScenarioTest(unittest.TestCase):
         )
 
     def test_lo_script_crea_lo_scenario_e_fa_il_backup_di_un_database_esistente(self):
-        with sqlite3.connect(self.db) as db:
+        with connetti(self.db) as db:
             db.execute("CREATE TABLE events (event_id INTEGER PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL)")
             db.execute("INSERT INTO events (actor, action, target) VALUES ('vecchio', 'vecchia', 'vecchio')")
         risultato = self.esegui("--scenario", "base", "--si")
@@ -171,10 +171,10 @@ class ScriptScenarioTest(unittest.TestCase):
         self.assertIn("Backup:", risultato.stdout)
         backup = [f for f in os.listdir(self._cartella.name) if ".backup-" in f]
         self.assertEqual(len(backup), 1)
-        with sqlite3.connect(self.db) as db:
+        with connetti(self.db) as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM agents_registry").fetchone()[0], 6)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM events WHERE actor = 'vecchio'").fetchone()[0], 0)
-        with sqlite3.connect(os.path.join(self._cartella.name, backup[0])) as db:
+        with connetti(os.path.join(self._cartella.name, backup[0])) as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM events WHERE actor = 'vecchio'").fetchone()[0], 1)
 
     def test_senza_conferma_non_tocca_nulla(self):

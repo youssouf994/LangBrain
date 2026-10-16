@@ -6,27 +6,23 @@ stanno in `tests/` (con il suo modulo qui), quelli scritti solo per Windows stan
 
     python -m pytest tests_windows -q -p no:cacheprovider
 
-## Fallimenti noti: 11 × `PermissionError [WinError 32]`
+## Fallimenti noti: nessuno
 
-Su Windows la suite ha **11 fallimenti noti**, tutti per lo stesso motivo: alla pulizia della cartella temporanea il file SQLite è
-ancora aperto e Windows non lo lascia cancellare (`WinError 32`). Su Linux lo stesso test passa perché un file aperto si può cancellare.
+La suite di Windows passa per intero. Fino al 16 ottobre 2026 aveva **11 fallimenti `PermissionError [WinError 32]`**
+(`test_win_all.py::DatabaseTest` ×4, `test_win_checkpointer_persistente.py` ×1, `test_win_scenario.py` ×6): alla pulizia della cartella
+temporanea il file SQLite era ancora aperto e Windows non lo lascia cancellare.
 
-| Modulo | Test |
-|---|---|
-| `test_win_all.py::DatabaseTest` | `test_il_conflitto_dimostrativo_si_semina_solo_se_richiesto_e_non_si_accumula`, `test_init_db_crea_le_tabelle_e_l_indice`, `test_init_db_e_idempotente_e_non_semina_dati_di_prova_per_default`, `test_un_database_con_lo_schema_vecchio_viene_migrato` |
-| `test_win_checkpointer_persistente.py::CheckpointerPersistenteTest` | `test_tabelle_create_nello_stesso_file_del_db_applicativo` |
-| `test_win_scenario.py::ScenarioTest` | `test_azzera_database_elimina_le_tabelle_e_tollera_quelle_mancanti`, `test_lo_scenario_base_crea_la_gerarchia_e_lo_storico`, `test_lo_scenario_vuoto_azzera_tutto_senza_nemmeno_il_seme`, `test_ricreare_lo_scenario_e_idempotente_e_cancella_i_dati_precedenti`, `test_un_database_con_schema_vecchio_viene_ricreato_da_capo` |
-| `test_win_scenario.py::ScriptScenarioTest` | `test_lo_script_crea_lo_scenario_e_fa_il_backup_di_un_database_esistente` |
+**Causa:** quei test aprivano il file con `with sqlite3.connect(percorso) as db:`. Il `with` di `sqlite3` conferma la transazione ma
+**non chiude** la connessione (lo dice la documentazione di Python), quindi il file restava aperto fino alla fine del test. Il codice
+dell'applicazione non c'entrava: usa SQLAlchemy/aiosqlite e chiude. Su Linux lo stesso test passava perché un file aperto si può cancellare.
 
-**Causa (verificata):** quei test aprono il file con `with sqlite3.connect(percorso) as db:`. Il `with` di `sqlite3` conferma la
-transazione ma **non chiude** la connessione (lo dice la documentazione di Python), quindi il file resta aperto fino alla fine del test.
-Il codice dell'applicazione non c'entra: usa SQLAlchemy/aiosqlite e chiude. Prova: lanciando gli stessi 34 test con un plugin che chiude la
-connessione all'uscita del `with` (sottoclasse di `sqlite3.Connection` il cui `__exit__` chiama `close()`), **passano tutti e 34**; senza,
-11 falliscono. Il nodo premium (`langbrain-premium-nodes`) ha già questa correzione nel proprio `tests_windows/conftest.py`
-(`_ConnessioneChiusaAllUscita`) e lì i 11 non falliscono.
+**Correzione (solo nei test):** `tests/sqlite_chiusura.py` ha `connetti(percorso)`, una `sqlite3.Connection` il cui `__exit__` chiama `close()`
+dopo il commit o il rollback di sempre. I test elencati sopra usano `with connetti(percorso) as db:`; `tests/test_sqlite_chiusura.py` ne prova il
+comportamento (chiusura, commit, rollback, file cancellabile subito). Su Linux non cambia nulla. **In un test nuovo che apre un file SQLite
+a mano usa `connetti`, non `sqlite3.connect`**, altrimenti su Windows il problema ricompare.
 
-Non sono stati corretti, per scelta: restano documentati. Chi vuole farlo ha due strade, entrambe solo nei test: usare
-`contextlib.closing(sqlite3.connect(...))` nei test elencati, oppure portare nel `conftest.py` la sottoclasse che chiude all'uscita.
+Il nodo premium (`langBrainInvoices`) ha lo stesso rimedio, applicato in modo globale nel proprio `tests_windows/conftest.py`
+(`_ConnessioneChiusaAllUscita`): non serve toccarlo, i due si sommano senza conflitti.
 
 ## Test instabili
 
