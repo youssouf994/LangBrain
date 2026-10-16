@@ -196,7 +196,12 @@ def _crea_schema_al_collegamento(motore_pg: AsyncEngine, schema: str) -> None:
     def _al_collegamento(connessione_dbapi, _record):
         cursore = connessione_dbapi.cursor()
         try:
-            cursore.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')  # `schema` è un identificatore nostro (esadecimale)
+            # Con più processi che si collegano insieme `CREATE SCHEMA IF NOT EXISTS` può comunque collidere: un blocco lo serializza.
+            cursore.execute(f"SELECT pg_advisory_lock({_CHIAVE_BLOCCO_SCHEMA})")
+            try:
+                cursore.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')  # `schema` è un identificatore nostro (esadecimale)
+            finally:
+                cursore.execute(f"SELECT pg_advisory_unlock({_CHIAVE_BLOCCO_SCHEMA})")
         finally:
             cursore.close()
 

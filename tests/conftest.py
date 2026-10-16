@@ -26,3 +26,20 @@ os.environ["DB_PATH"] = os.path.join(_cartella_db, "test.db")
 for _variabile in ("API_KEY", "API_KEY_TIROCINANTE", "API_KEY_MEDICO_DI_GUARDIA", "API_KEY_PRIMARIO",
                    "API_KEY_VIEWER", "API_KEY_OPERATOR", "API_KEY_ADMIN"):
     os.environ[_variabile] = ""
+
+
+# Modalità Postgres (TEST_PG_URL): ogni database temporaneo diventa uno schema dello stesso Postgres di prova.
+try:
+    from tests import pg_isolamento
+except ImportError:  # `tests/` non è un pacchetto importabile in questa modalità di lancio
+    import pg_isolamento
+
+pg_isolamento.installa()
+
+
+def pytest_collection_modifyitems(items):
+    pg_isolamento.segna_test_non_adatti(items)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    pg_isolamento.pulisci()

@@ -1,16 +1,22 @@
 name: CI
 
+# Gira su ogni push (qualunque ramo) e sulle pull request verso main.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
-    name: Test (Python ${{ matrix.python }})
+  test-sqlite:
+    name: Test SQLite (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -25,8 +31,65 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m pip check
-      - name: Suite di test (database temporanei, nessun LLM reale)
+      - name: Suite di test (database SQLite temporanei, nessun LLM reale)
         run: python -m pytest tests -q
+
+  test-postgres:
+    name: Test Postgres (Python 3.12)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: prova
+          POSTGRES_DB: langbrain_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d langbrain_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # TEST_PG_URL: tutta la suite gira su Postgres (ogni database temporaneo è uno schema, vedi tests/pg_isolamento.py).
+      # TEST_DATABASE_URL: i test di integrazione di tests/test_postgres.py.
+      TEST_PG_URL: postgresql://postgres:prova@localhost:5432/langbrain_test
+      TEST_DATABASE_URL: postgresql://postgres:prova@localhost:5432/langbrain_test
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Suite di test su Postgres 16
+        run: python -m pytest tests -q
+
+  docker-build:
+    name: Immagine Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Costruisce l'immagine
+        run: docker build -t langbrain:ci .
+      - name: Avvia il contenitore e chiama /
+        run: |
+          docker run -d --name langbrain-ci -p 8000:8000 -e LANGBRAIN_WORKERS=1 -e LANGBRAIN_REQUIRE_API_KEY=1 \
+            -e API_KEY=chiave-di-prova-per-la-ci langbrain:ci
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/ > /dev/null; then echo "risponde dopo ${i}s"; exit 0; fi
+            sleep 1
+          done
+          echo "Il contenitore non ha risposto entro 60 s. Log:"
+          docker logs langbrain-ci
+          exit 1
+      - name: Senza chiave API il contenitore si rifiuta di partire (LANGBRAIN_REQUIRE_API_KEY=1)
+        run: |
+          if docker run --rm -e LANGBRAIN_REQUIRE_API_KEY=1 -e API_KEY= langbrain:ci 2>&1 | tee uscita.txt; then
+            echo "Doveva rifiutare l'avvio"; exit 1
+          fi
+          grep -q "Avvio rifiutato" uscita.txt
 
   sicurezza:
     name: Segreti e dipendenze
@@ -53,3 +116,13 @@ jobs:
       # Scansiona tutta la cronologia (non solo l'intervallo del push: un primo push non ha un commit precedente) e le dipendenze fissate
       - name: Scansione di segreti e dipendenze
         run: bash scripts/scansione_sicurezza.sh
+
+  conformita:
+    # DISABILITATO: la suite di conformità al contratto 1.0.4 vive nel fork di HQ, non in questo repository.
+    # Si accende lì togliendo `if: false` e indicando il comando della suite al posto del segnaposto.
+    name: Conformità al contratto 1.0.4 (solo nel fork di HQ)
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: echo "Segnaposto: eseguire qui la suite di conformità del contratto 1.0.4."
