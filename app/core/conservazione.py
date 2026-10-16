@@ -19,7 +19,7 @@ from typing import Awaitable, Callable
 
 from sqlalchemy import delete
 
-from app.core import archivio, bus_eventi
+from app.core import archivio, bus_eventi, idempotenza
 from app.db import schema
 
 logger = logging.getLogger(__name__)
@@ -85,6 +85,10 @@ async def esegui_pulizie(db_path: str | None = None) -> dict[str, int]:
         tolte["stream"] = await bus_eventi.pulisci_buffer(db_path)
     except Exception:
         logger.exception("Pulizia del buffer del flusso di eventi non riuscita.")
+    try:  # anche le richieste memorizzate per l'idempotenza scadono da sole
+        tolte["idempotenza"] = await idempotenza.pulisci_scadute(db_path)
+    except Exception:
+        logger.exception("Pulizia delle richieste idempotenti non riuscita.")
     giorni = giorni_eventi()
     if giorni:
         try:

@@ -80,6 +80,13 @@ routes and the old table are accepted as aliases. `tests/` still imports the old
   `: ping`). The id is monotonic, persisted and never reused (not even after a restart or a buffer cleanup); the buffer keeps
   at least one hour (`LANGBRAIN_STREAM_BUFFER_ORE`, default 24); only the contract's seven event types are accepted and
   nothing from the graph is published unless a caller does it explicitly.
+- **Idempotency** (`app/core/idempotenza.py`, table `idempotenza`): `esegui_una_volta(ambito, chiave, funzione, ttl_secondi)`
+  runs an operation once per (scope, key) and gives later calls the stored result, also when they arrive while the first is
+  still running and across processes (an atomic insert reserves the key; an abandoned run expires by itself; nothing is stored
+  if the function raises). `ttl_secondi=None` keeps the result forever (bookings by `event_id`); 60 is the contract's window
+  for commands. `tenta_comando(..., idempotenza_secondi=60)` uses it: a repeated call with the same correlation id on the same
+  device does not act and does not write a second decision (same `decision_id`, `riutilizzato=True`). Expired rows are cleaned
+  with the retention cycle.
 - **Checked against the real contract file** (1.0.4): `Decision` mapping and `GET /decisions` search with an opaque cursor
   (`app/core/decisioni.py`); the stream envelope `id` is a numeric string; the `Approval` shape (`come_contratto`,
   `leggi_chiusa`) and an `APPROVAL_EXPIRED` event so a late decision is `already_closed`; device description with limits,

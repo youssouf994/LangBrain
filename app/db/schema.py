@@ -114,6 +114,17 @@ stream_events = Table(
     sqlite_autoincrement=True,
 )
 
+# Richieste già eseguite, per l'idempotenza (vedi `app/core/idempotenza.py`): una riga per (ambito, chiave).
+idempotenza = Table(
+    "idempotenza", metadata,
+    Column("ambito", String(255), primary_key=True),
+    Column("chiave", String(255), primary_key=True),
+    Column("stato", Text, nullable=False),
+    Column("risposta", Text),
+    Column("creata_il", Float, nullable=False),
+    Column("scade_il", Float),  # NULL = non scade mai
+)
+
 # Stato condiviso tra processi e contratti di affitto (vedi `app/core/multiprocesso.py`)
 runtime_state = Table(
     "runtime_state", metadata,

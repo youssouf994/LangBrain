@@ -17,10 +17,10 @@ non esiste qui: la conferma dell'effetto sul dispositivo (potenza misurata) spet
 
 import inspect
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Awaitable, Callable
 
-from app.core import contesto
+from app.core import contesto, idempotenza
 from app.core.configurazione import get_configurazione
 from app.core.priorita import NOME_BRAIN, PRIORITA_BRAIN, priorita_attore, trova_blocco_prevalente
 from app.core.risultati import comanda_tool, leggi_tool
@@ -82,6 +82,7 @@ class EsitoComando:
     valore_precedente: str | None = None
     valore_richiesto: str | None = None
     regola: str | None = None
+    riutilizzato: bool = False  # True: è la risposta di una richiesta identica già eseguita (idempotenza)
 
     @property
     def riuscito(self) -> bool:
@@ -158,11 +159,48 @@ async def tenta_comando(
     tools_map: dict[str, Any] | None = None,
     db_path: str | None = None,
     finestra_conflitto_minuti: int = FINESTRA_CONFLITTO_MINUTI,
+    idempotenza_secondi: float | None = None,
 ) -> EsitoComando:
     """
     Tenta di portare `target` a `valore` per conto di `attore` (`user:<email>`, `rule:<id>`, `organ:<nome>`, `brain`,
     `assistant`, `system`, o il nome di un agente). Non solleva mai: restituisce un `EsitoComando` e scrive la decisione.
+
+    Con `idempotenza_secondi` (il contratto 1.0.4 chiede 60) e un correlation id dato dalla richiesta, una seconda chiamata con
+    lo stesso id sullo stesso dispositivo entro quel tempo non esegue nulla e non scrive un'altra decisione: restituisce lo
+    stesso esito (stesso `decision_id`), con `riutilizzato=True`. Se il correlation id manca non c'è nulla su cui riconoscere
+    la ripetizione e il comando si esegue sempre.
     """
+    chiave = correlation_id or contesto.correlation_id_corrente()
+    argomenti = dict(azione=azione, motivazione=motivazione, command_id=command_id, tools_map=tools_map, db_path=db_path,
+                     finestra_conflitto_minuti=finestra_conflitto_minuti)
+    if idempotenza_secondi is None or not chiave:
+        return await _tenta(attore, target, valore, correlation_id, **argomenti)
+
+    async def esegui() -> dict[str, Any]:
+        return asdict(await _tenta(attore, target, valore, chiave, **argomenti))
+
+    try:
+        dati, riutilizzato = await idempotenza.esegui_una_volta(
+            f"comando:{target}", chiave, esegui, ttl_secondi=idempotenza_secondi, db_path=db_path)
+    except Exception as errore:  # l'archivio dell'idempotenza non risponde: meglio un esito d'errore che un comando a metà
+        logger.exception("[Comandi] Idempotenza non disponibile per '%s'", target)
+        return EsitoComando(ERRORE_INTERNO, f"Errore interno: {errore}", None, chiave, attore, target, None, str(valore))
+    return EsitoComando(**{**dati, "riutilizzato": riutilizzato})
+
+
+async def _tenta(
+    attore: str,
+    target: str,
+    valore: Any,
+    correlation_id: str | None,
+    *,
+    azione: str,
+    motivazione: str | None,
+    command_id: str | None,
+    tools_map: dict[str, Any] | None,
+    db_path: str | None,
+    finestra_conflitto_minuti: int,
+) -> EsitoComando:
     cid = correlation_id or contesto.correlation_id_corrente() or contesto.nuovo_correlation_id()
     attore = contesto.mappa_attore(attore) or (attore or "").strip() or contesto.ATTORE_SISTEMA
     richiesto = str(valore)

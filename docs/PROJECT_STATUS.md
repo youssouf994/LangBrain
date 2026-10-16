@@ -116,6 +116,7 @@ Letto `openapi.yaml` e `README-youssouf.md`; confrontato il nucleo voce per voce
 | `Decision.actor` (`rule:`, `organ:`, `brain`, `user:`, `assistant`, `system`) | gli agenti scrivono `Brain`/`organ_x`: tradotti | nucleo: `attore_per_contratto` |
 | `Decision.target {type, device_id}` | `events.target` è una stringa: `device` salvo `apartment`/`rules`/`schedule` | nucleo: `target_per_contratto` |
 | `GET /decisions` (`from`, `to`, `device_id`, `actor`, `correlation_id`, `limit` 1-200, `cursor` opaco, dal più recente) | ricerca assente | nucleo: `cerca_decisioni` (+ `next_cursor`); la rotta è dell'adattatore |
+| Idempotenza: stesso `X-Correlation-Id` sullo stesso endpoint entro 60 s (C02); `POST /bookings` su `event_id` senza limite | assente | nucleo: `app/core/idempotenza.py` (`esegui_una_volta`, tra processi e su entrambi i database) e `tenta_comando(..., idempotenza_secondi=60)`; la rotta HTTP e la scelta della chiave sono dell'adattatore |
 | Conservazione 90 giorni | presente, spenta di predefinito | nucleo: `LANGBRAIN_RETENTION_EVENTI_GIORNI=90` nel compose |
 | `CommandReason` e `CommandState` | 6 motivi su 7 in `EsitoComando.motivo_contratto`; `no_confirmation` e gli stati `pending/sent/verifying/acked/timeout` non esistono nel nucleo | adattatore (macchina a stati, timeout 10 s, conferma) |
 | `StreamEnvelope`, 7 tipi, `Last-Event-ID`, buffer ≥ 1 h, `: ping` | `id` era intero, ora stringa numerica crescente; il resto già presente | nucleo: `bus_eventi.py`; la rotta `/stream` è dell'adattatore |
@@ -127,5 +128,5 @@ Letto `openapi.yaml` e `README-youssouf.md`; confrontato il nucleo voce per voce
 | Header 401→400→501, `/api/v1`, mappa `x-features` | non sono del nucleo | adattatore |
 
 Scenari `x-conformita` (16): il nucleo permette di passare C01, C03, C05, C07 e C12 con il lavoro dell'adattatore sopra
-(`tenta_comando`, `bus_eventi`, `approvazioni`); C02 (idempotenza 60 s), C04, C06, C08-C11, C13-C16 sono interamente
+(`tenta_comando`, `bus_eventi`, `approvazioni`); C02 (il meccanismo di idempotenza è nel nucleo), C04, C06, C08-C11, C13-C16 sono interamente
 dell'adattatore o dei suoi effettori. Mancano nel nucleo solo i punti sopra già chiusi in questa passata.

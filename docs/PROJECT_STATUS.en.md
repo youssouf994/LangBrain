@@ -137,4 +137,4 @@ state machine, `/stream`, `/decisions`, `/health` routes, header checks, `Error`
 the adapter's (HQ's code). What changed in the core: `Decision` mapping and search (`app/core/decisioni.py`, with
 actor/target translation and an opaque cursor), stream envelope `id` as a numeric string, the `Approval` contract shape
 and closed approvals (`approvazioni.py`, plus an `APPROVAL_EXPIRED` event so a late decision is `already_closed`), device
-description with limits, `online` and `last_seen` (`dispositivi.py`), and health pieces (`salute.py`).
+description with limits, `online` and `last_seen` (`dispositivi.py`), and health pieces (`salute.py`), and idempotency (`idempotenza.py`: same key = same answer and a single execution, 60 s for commands, no time limit for bookings; `tenta_comando(..., idempotenza_secondi=60)`).
