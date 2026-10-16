@@ -10,7 +10,8 @@ riconsegnare ciò che un client ha perso e `flusso` per seguire i nuovi eventi.
   - Buffer: gli eventi restano almeno un'ora (`LANGBRAIN_STREAM_BUFFER_ORE`, predefinito 24, minimo 1); la pulizia gira con
     quella della conservazione dei dati (`app/core/conservazione.py`).
   - Tipi: solo i sette del contratto 1.0.4 (`TIPI_EVENTO`); un altro tipo è un errore di programmazione (`ValueError`).
-  - Involucro: `id, event, ts, apartment_id, correlation_id, data` (`ts` in ISO 8601 UTC al millisecondo).
+  - Involucro: `id, event, ts, apartment_id, correlation_id, data` (`ts` in ISO 8601 UTC al millisecondo). L'`id` è una
+    STRINGA numerica (così lo vuole lo schema `StreamEnvelope`); `pubblica` restituisce l'intero, `leggi_da` accetta stringa o intero.
   - Tempestività: lo stesso processo risveglia chi aspetta subito; tra processi si controlla il database ogni 0,25 s,
     quindi un evento arriva entro 1 s dal fatto.
 """
@@ -57,7 +58,7 @@ def _involucro(riga) -> dict[str, Any]:
         dati = json.loads(riga.data) if riga.data else {}
     except ValueError:
         dati = {}
-    return {"id": riga.id, "event": riga.event, "ts": riga.ts, "apartment_id": riga.apartment_id,
+    return {"id": str(riga.id), "event": riga.event, "ts": riga.ts, "apartment_id": riga.apartment_id,
             "correlation_id": riga.correlation_id, "data": dati}
 
 
@@ -136,7 +137,7 @@ async def flusso(ultimo_id_ricevuto: int | None = None, ping_secondi: float = IN
             continue
         for evento in eventi:
             yield formatta_sse(evento)
-            ultimo = evento["id"]
+            ultimo = int(evento["id"])
 
 
 async def pulisci_buffer(db_path: str | None = None) -> int:

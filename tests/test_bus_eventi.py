@@ -34,12 +34,14 @@ class BusTest(unittest.IsolatedAsyncioTestCase):
             b = await self.pubblica("command.updated", {"command_id": "x", "status": "acked"})
         self.assertLess(a, b)
         eventi = await bus_eventi.leggi_da(0, db_path=self.db)
-        self.assertEqual([e["id"] for e in eventi], [a, b])
+        self.assertEqual([e["id"] for e in eventi], [str(a), str(b)])  # l'id dell'involucro e' una stringa
         primo = eventi[0]
         self.assertEqual(set(primo), {"id", "event", "ts", "apartment_id", "correlation_id", "data"})
         self.assertEqual((primo["event"], primo["apartment_id"], primo["correlation_id"]), ("device.state", "ap01", "c-1"))
         self.assertEqual(primo["data"], {"device_id": "luce", "state": "ON"})
         self.assertRegex(primo["ts"], ISO_MS)
+        self.assertIsInstance(primo["id"], str)
+        self.assertTrue(primo["id"].isdigit())
 
     async def test_il_correlation_id_arriva_dal_contesto(self):
         with contesto.contesto("cid-ctx", None):
@@ -49,7 +51,8 @@ class BusTest(unittest.IsolatedAsyncioTestCase):
     async def test_last_event_id_riconsegna_esattamente_gli_eventi_persi_in_ordine(self):
         ids = [await self.pubblica("device.online", {"n": i}) for i in range(6)]
         persi = await bus_eventi.leggi_da(ids[2], db_path=self.db)
-        self.assertEqual([e["id"] for e in persi], ids[3:])
+        self.assertEqual([e["id"] for e in persi], [str(i) for i in ids[3:]])
+        self.assertEqual([e["id"] for e in await bus_eventi.leggi_da(str(ids[2]), db_path=self.db)], [str(i) for i in ids[3:]])  # accetta anche la stringa
         self.assertEqual([e["data"]["n"] for e in persi], [3, 4, 5])
         self.assertEqual(await bus_eventi.leggi_da(ids[-1], db_path=self.db), [])
 
@@ -102,7 +105,7 @@ class BusTest(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
         nuovo = await self.pubblica("apartment.changed", {"mode": "eco"})
         eventi = await asyncio.wait_for(attesa, timeout=2)
-        self.assertEqual([e["id"] for e in eventi], [nuovo])
+        self.assertEqual([e["id"] for e in eventi], [str(nuovo)])
         self.assertLess(asyncio.get_running_loop().time() - inizio, 1.0)  # entro un secondo dal fatto
 
     async def test_attendi_nuovi_scade_senza_eventi(self):

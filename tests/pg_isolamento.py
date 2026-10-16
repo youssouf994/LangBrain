@@ -38,6 +38,7 @@ NON_SU_POSTGRES: dict[str, str] = {
     "UrlTest::test_il_backend_predefinito_e_sqlite_anche_se_c_e_un_url": "prova la scelta SQLite, che qui è sostituita",
     "UrlTest::test_backend_postgres_vale_solo_per_il_file_predefinito": "prova la scelta del file, che qui è sostituita",
     "MotoreSqliteTest::": _SQLITE_ELIMINAZIONE,
+    "SaluteTest::test_database_irraggiungibile_non_solleva": "un percorso inesistente su Postgres diventa uno schema nuovo, raggiungibile",
 }
 
 _schemi: set[str] = set()

@@ -30,6 +30,7 @@ from app.core import conservazione
 from app.core.avvio import verifica_avvio
 from app.core.contesto import MiddlewareContesto
 from app.core.log_json import configura_log
+from app.core.salute import VERSIONE_NUCLEO
 from app.checkpointer import apri_checkpointer, chiudi_checkpointer, get_checkpointer, svuota_checkpoint
 from app.core import multiprocesso
 from app.core.configurazione import get_configurazione
@@ -186,7 +187,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LangBrain API",
     description="API FastAPI con LangGraph per la gestione gerarchica N-livelli (Cervello -> Organi -> Componenti)",
-    version="2.1.0",
+    version=VERSIONE_NUCLEO,
     lifespan=lifespan,
     dependencies=[Depends(autentica_e_autorizza), Depends(sincronizza_stato)],
 )

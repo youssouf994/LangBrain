@@ -129,3 +129,12 @@ In the core, so that an adapter (HQ's code) can mount on top without forcing any
 - [x] Event bus (`app/core/bus_eventi.py`): persisted monotonic id that is never reused, `Last-Event-ID`, buffer of at least one hour, `: ping`, only the contract's seven types and only what is published. The `/stream` HTTP route is missing: it belongs to the adapter.
 - [ ] `agent_platform` provider in the MAO (OpenAI-compatible endpoint, the service account's Google credentials, `GCP_PROJECT`, `GCP_LOCATION`): waiting for HQ's parameters.
 - [ ] Real hardware adapters (Shelly over WebSocket, MQTT) and physical device state reconciled after a restart.
+
+### Comparison with the real contract file (openapi.yaml 1.0.4, 2026-10-16)
+
+Read `openapi.yaml` and `README-youssouf.md` and compared the core item by item. Corrections are in the core; the
+state machine, `/stream`, `/decisions`, `/health` routes, header checks, `Error` format and the device catalogue are
+the adapter's (HQ's code). What changed in the core: `Decision` mapping and search (`app/core/decisioni.py`, with
+actor/target translation and an opaque cursor), stream envelope `id` as a numeric string, the `Approval` contract shape
+and closed approvals (`approvazioni.py`, plus an `APPROVAL_EXPIRED` event so a late decision is `already_closed`), device
+description with limits, `online` and `last_seen` (`dispositivi.py`), and health pieces (`salute.py`).

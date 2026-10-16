@@ -23,6 +23,12 @@ class SimulatedEffector(Reflex):
         self.guasto: str | None = None
         self.guasti_residui: int | None = None
         self.guasto_solo_comandi = False
+        self.ultimo_contatto = None  # datetime UTC dell'ultima lettura o comando riusciti
+
+    @property
+    def online(self) -> bool:
+        """False con un guasto che blocca anche le letture (dispositivo che non risponde); i comandi soli non lo rendono offline."""
+        return not self.guasto or self.guasto_solo_comandi
 
     def imposta_guasto(self, messaggio: str | None, operazioni: int | None = None, solo_comandi: bool = False) -> None:
         """
@@ -46,14 +52,20 @@ class SimulatedEffector(Reflex):
 
     async def get_tool_value(self) -> Any:
         self._verifica_guasto("lettura")
+        self._segna_contatto()
         if multiprocesso.condiviso():  # più processi: il valore sta nel database, non nella memoria di uno solo
             valore = await multiprocesso.leggi(f"effettore:{self.target_device}", multiprocesso.ASSENTE)
             if valore is not multiprocesso.ASSENTE:
                 self._current_value = valore
         return self._current_value
 
+    def _segna_contatto(self) -> None:
+        from app.db.schema import adesso_utc
+        self.ultimo_contatto = adesso_utc()
+
     async def set_tool_value(self, value: Any) -> bool:
         self._verifica_guasto("comando")
+        self._segna_contatto()
         # Sanitizza il valore: rimuove l'unità se già presente per evitare duplicazioni nel log
         raw = str(value)
         if self.unit and raw.endswith(self.unit):

@@ -4,6 +4,7 @@ import asyncio
 import os
 import tempfile
 import unittest
+import uuid
 from typing import Any, TypedDict
 
 from langgraph.checkpoint.memory import InMemorySaver
@@ -129,6 +130,47 @@ class ApprovazioniTest(unittest.IsolatedAsyncioTestCase):
         await self.decidi(b.approval_id)
         self.assertIsNone(await self.pendente())
         self.assertEqual((await self.decidi(b.approval_id)).stato, "already_closed")
+
+    async def test_la_pendente_nel_formato_approval_del_contratto(self):
+        a = await self.pendente()
+        c = a.come_contratto()
+        self.assertEqual(set(c), {"approval_id", "status", "created_at", "expires_at", "expires_action", "source", "description",
+                                  "reason", "proposed_action", "decided_by", "decided_at", "note", "correlation_id"})
+        self.assertEqual((c["status"], c["approval_id"], c["source"]), ("pending", a.approval_id, "organ"))
+        self.assertEqual(c["proposed_action"], {"type": "device_command", "device_id": "ac_salotto", "action": "ON"})
+        self.assertIn(c["expires_action"], ("reject", "approve", "wait"))
+        self.assertIsNone(c["decided_by"])
+        uuid.UUID(c["correlation_id"])
+
+    async def test_una_modalita_dell_appartamento_e_un_apartment_mode(self):
+        from app.core.approvazioni import Approvazione
+        a = Approvazione("x", self.thread, "t", "brain", None, "eco", "d", "r")
+        c = a.come_contratto()
+        self.assertEqual((c["source"], c["proposed_action"]), ("brain", {"type": "apartment_mode", "mode": "eco"}))
+
+    async def test_la_scadenza_del_nucleo_si_traduce_in_expires_action(self):
+        from app.core.approvazioni import Approvazione
+        for nucleo, contratto in (("respingi", "reject"), ("umano", "wait"), ("sistema", "approve"), (None, "wait")):
+            self.assertEqual(Approvazione("x", "t", "t", None, None, None, "d", "r", expires_action=nucleo).come_contratto()["expires_action"],
+                             contratto)
+
+    async def test_una_approvazione_chiusa_si_rilegge_con_chi_e_quando(self):
+        a = await self.pendente()
+        with contesto.contesto("cid-ch", "user:anna@example.com"):
+            await self.decidi(a.approval_id, "reject", "ospiti ancora in casa")
+        chiusa = await approvazioni.leggi_chiusa(a.approval_id, self.db)
+        self.assertEqual((chiusa["status"], chiusa["decided_by"], chiusa["note"], chiusa["correlation_id"]),
+                         ("rejected", "user:anna@example.com", "ospiti ancora in casa", "cid-ch"))
+        self.assertTrue(chiusa["decided_at"].endswith("Z"))
+        self.assertIsNone(await approvazioni.leggi_chiusa("mai-esistita", self.db))
+
+    async def test_un_interrupt_scaduto_e_chiuso_e_una_decisione_tardiva_e_already_closed(self):
+        a = await self.pendente()
+        await self.gestore._registra_scadenza(self.thread, a.approval_id, "respingi", 300)
+        chiusa = await approvazioni.leggi_chiusa(a.approval_id, self.db)
+        self.assertEqual((chiusa["status"], chiusa["decided_by"]), ("expired", "system"))
+        ricarico = await approvazioni.decidi(self.grafo, self.gestore, "altro-thread", a.approval_id, "approve", db_path=self.db)
+        self.assertEqual(ricarico.stato, "already_closed")
 
     async def test_le_parole_italiane_valgono_come_quelle_inglesi(self):
         a = await self.pendente()

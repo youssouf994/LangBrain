@@ -38,6 +38,7 @@ from app.core.configurazione import SCADENZA_SISTEMA, SCADENZA_UMANO, get_config
 from app.db import schema
 from app.db.database import DB_PATH
 from app.graph.hitl_config import DECISIONE_SISTEMA, hitl_manager
+from app.tools.nervous_system import NervousSystem
 
 logger = logging.getLogger(__name__)
 
@@ -249,9 +250,20 @@ class GestoreTimerHitl:
                         await self._imposta_stato(thread_id, STATO_ERRORE)
                         continue
                     respinti.append(thread_id)
+                    await self._registra_scadenza(thread_id, interrupt_id, azione, durata)
                     await self._elimina(thread_id)
                     await self.sincronizza(thread_id)  # se il grafo si è fermato di nuovo parte un nuovo timer
         return respinti
+
+    async def _registra_scadenza(self, thread_id: str, interrupt_id: str, azione: str, durata: int) -> None:
+        """Scrive nel registro che l'approvazione è scaduta (`approval_id` = id dell'interrupt): non solleva, il grafo è già ripreso."""
+        try:
+            await NervousSystem(db_path=self.db_path).log_event(
+                contesto.ATTORE_SISTEMA, "APPROVAL_EXPIRED", thread_id, "PENDING", "EXPIRED",
+                f"Nessuna risposta entro {durata}s: azione alla scadenza '{azione}'.",
+                outcome="rejected" if azione != SCADENZA_SISTEMA else "informational", approval_id=interrupt_id)
+        except Exception:
+            logger.exception("[TimerHITL] Scadenza dell'approvazione '%s' non registrata.", interrupt_id)
 
     async def _imposta_stato(self, thread_id: str, stato: str) -> None:
         async with archivio.motore(self.db_path).begin() as db:

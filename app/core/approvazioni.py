@@ -16,12 +16,13 @@ Né `approvazione_in_attesa` né `decidi` sollevano per i casi previsti: restitu
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from langgraph.types import Command
 from sqlalchemy import select
 
-from app.core import archivio
+from app.core import archivio, contesto, decisioni
 from app.db import schema
 from app.tools.nervous_system import NervousSystem
 
@@ -39,6 +40,11 @@ _DECISIONI = {"approve": "APPROVA", "approva": "APPROVA", "reject": "RESPINGI", 
 _ESITO_DECISIONE = {"APPROVA": "applied", "RESPINGI": "rejected"}
 
 
+# `expires_action` del contratto <- azione alla scadenza del nucleo (respingi/umano/sistema)
+_AZIONE_ALLA_SCADENZA = {"respingi": "reject", "umano": "wait", "sistema": "approve"}
+_MODALITA_APPARTAMENTO = ("comfort", "eco", "empty")
+
+
 @dataclass(frozen=True)
 class Approvazione:
     approval_id: str
@@ -52,6 +58,23 @@ class Approvazione:
     max_wait_seconds: int | None = None
     expires_at: str | None = None
     expires_action: str | None = None
+    created_at: str | None = None
+    correlation_id: str | None = None
+
+    def come_contratto(self) -> dict[str, Any]:
+        """L'approvazione pendente nel formato `Approval` del contratto (compreso `EventApprovalPending`)."""
+        if self.azione and str(self.azione).lower() in _MODALITA_APPARTAMENTO:
+            azione: dict[str, Any] = {"type": "apartment_mode", "mode": str(self.azione).lower()}
+        else:
+            azione = {"type": "device_command", "device_id": self.target or "", "action": str(self.azione or "")}
+        nodo = (self.node or "").casefold()
+        return {
+            "approval_id": self.approval_id, "status": "pending", "created_at": self.created_at,
+            "expires_at": self.expires_at, "expires_action": _AZIONE_ALLA_SCADENZA.get(self.expires_action or "", "wait"),
+            "source": "brain" if nodo == "brain" else "organ", "description": self.description, "reason": self.reason,
+            "proposed_action": azione, "decided_by": None, "decided_at": None, "note": None,
+            "correlation_id": self.correlation_id,
+        }
 
 
 @dataclass(frozen=True)
@@ -110,7 +133,27 @@ async def approvazione_in_attesa(grafo, gestore, thread_id: str) -> Approvazione
         approval_id=approval_id, thread_id=thread_id, tipo=str(payload.get("type", "")), node=payload.get("node_name"),
         target=payload.get("target_device"), azione=payload.get("proposed_action"), description=descrizione, reason=motivo,
         max_wait_seconds=payload.get("max_wait_seconds"), expires_at=stato_timer.get("scade_il"),
-        expires_action=stato_timer.get("azione_alla_scadenza"))
+        expires_action=stato_timer.get("azione_alla_scadenza"),
+        created_at=schema.iso_ms(datetime.fromtimestamp(payload["timestamp"], tz=timezone.utc))
+        if isinstance(payload.get("timestamp"), (int, float)) else None,
+        correlation_id=contesto.correlation_id_corrente() or contesto.nuovo_correlation_id())
+
+
+async def leggi_chiusa(approval_id: str, db_path: str | None = None) -> dict[str, Any] | None:
+    """
+    Un'approvazione già chiusa (decisa o scaduta) come `Approval` parziale — `status`, `decided_by`, `decided_at`, `note`,
+    `correlation_id` — oppure None se non c'è traccia. La descrizione dell'approvazione non si conserva dopo la chiusura.
+    """
+    ev = schema.events
+    async with archivio.motore(db_path).connect() as db:
+        riga = (await db.execute(select(ev).where(ev.c.approval_id == approval_id).order_by(ev.c.event_id.desc()).limit(1))).first()
+    if riga is None:
+        return None
+    r = dict(riga._mapping)
+    stato = {"APPROVAL_APPROVED": "approved", "APPROVAL_REJECTED": "rejected", "APPROVAL_EXPIRED": "expired"}.get(r["action"], "rejected")
+    return {"approval_id": approval_id, "status": stato, "decided_by": decisioni.attore_per_contratto(r["actor"]),
+            "decided_at": schema.iso_ms(r["timestamp"]), "note": r.get("reasoning"),
+            "correlation_id": r.get("correlation_id") or decisioni.UUID_NULLO}
 
 
 async def _gia_decisa(approval_id: str, db_path: str | None) -> bool:

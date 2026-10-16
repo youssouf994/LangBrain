@@ -100,7 +100,8 @@ class NervousSystem:
         try:
             async with self._motore().begin() as db:
                 risultato = await db.execute(insert(events).values(
-                    actor=attore, action=action, target=target, old_value=str(old_value), new_value=str(new_value),
+                    actor=attore, action=action, target=target,
+                    old_value=None if old_value is None else str(old_value), new_value=None if new_value is None else str(new_value),
                     reasoning=reasoning, escalated=int(bool(escalated)), correlation_id=correlazione, outcome=esito,
                     command_id=command_id, approval_id=approval_id))
                 evento_id = risultato.inserted_primary_key[0]

@@ -80,6 +80,11 @@ routes and the old table are accepted as aliases. `tests/` still imports the old
   `: ping`). The id is monotonic, persisted and never reused (not even after a restart or a buffer cleanup); the buffer keeps
   at least one hour (`LANGBRAIN_STREAM_BUFFER_ORE`, default 24); only the contract's seven event types are accepted and
   nothing from the graph is published unless a caller does it explicitly.
+- **Checked against the real contract file** (1.0.4): `Decision` mapping and `GET /decisions` search with an opaque cursor
+  (`app/core/decisioni.py`); the stream envelope `id` is a numeric string; the `Approval` shape (`come_contratto`,
+  `leggi_chiusa`) and an `APPROVAL_EXPIRED` event so a late decision is `already_closed`; device description with limits,
+  `online`, `last_seen` (`app/core/dispositivi.py`); health pieces (`app/core/salute.py`); missing `old_value`/`new_value` are
+  stored as NULL.
 - **CI on GitHub**: SQLite on Python 3.12 and 3.14, the whole suite on Postgres 16, Docker image build with startup, gitleaks
   and pip-audit; the `conformita` job is disabled (it lives in HQ's fork).
 

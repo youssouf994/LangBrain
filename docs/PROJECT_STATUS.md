@@ -104,3 +104,28 @@ Nel nucleo, pronto perché un adattatore (codice di HQ) si monti sopra senza for
 - [x] Bus di eventi (`app/core/bus_eventi.py`): id monotono persistito e mai riusato, `Last-Event-ID`, buffer di almeno un'ora, `: ping`, solo i sette tipi del contratto e solo ciò che si pubblica. Manca la rotta HTTP `/stream`, che è dell'adattatore.
 - [ ] Provider `agent_platform` nel MAO (endpoint OpenAI-compatibile, credenziali Google dell'account di servizio, `GCP_PROJECT`, `GCP_LOCATION`): in attesa dei parametri da HQ.
 - [ ] Adattatori hardware reali (Shelly via WebSocket, MQTT) e stato fisico dei dispositivi riconciliato dopo il riavvio.
+
+### Confronto con il file vero del contratto (openapi.yaml 1.0.4, 2026-10-16)
+
+Letto `openapi.yaml` e `README-youssouf.md`; confrontato il nucleo voce per voce. «Nucleo» = corretto o già presente qui;
+«adattatore» = codice di HQ (nodo domotica).
+
+| Voce del contratto | Stato nel nucleo | Dove si chiude |
+|---|---|---|
+| `Decision`: campi, `outcome`, `command_id`, `approval_id`, `correlation_id` | presenti in `events`; `decision_id` esce come stringa, `old_value`/`new_value` nulli restano NULL | nucleo: `app/core/decisioni.py` (`come_decisione`) |
+| `Decision.actor` (`rule:`, `organ:`, `brain`, `user:`, `assistant`, `system`) | gli agenti scrivono `Brain`/`organ_x`: tradotti | nucleo: `attore_per_contratto` |
+| `Decision.target {type, device_id}` | `events.target` è una stringa: `device` salvo `apartment`/`rules`/`schedule` | nucleo: `target_per_contratto` |
+| `GET /decisions` (`from`, `to`, `device_id`, `actor`, `correlation_id`, `limit` 1-200, `cursor` opaco, dal più recente) | ricerca assente | nucleo: `cerca_decisioni` (+ `next_cursor`); la rotta è dell'adattatore |
+| Conservazione 90 giorni | presente, spenta di predefinito | nucleo: `LANGBRAIN_RETENTION_EVENTI_GIORNI=90` nel compose |
+| `CommandReason` e `CommandState` | 6 motivi su 7 in `EsitoComando.motivo_contratto`; `no_confirmation` e gli stati `pending/sent/verifying/acked/timeout` non esistono nel nucleo | adattatore (macchina a stati, timeout 10 s, conferma) |
+| `StreamEnvelope`, 7 tipi, `Last-Event-ID`, buffer ≥ 1 h, `: ping` | `id` era intero, ora stringa numerica crescente; il resto già presente | nucleo: `bus_eventi.py`; la rotta `/stream` è dell'adattatore |
+| `Approval` (`status`, `created_at`, `expires_at`, `expires_action` reject/approve/wait, `source`, `proposed_action`, `decided_*`, `note`) | forma del contratto assente | nucleo: `Approvazione.come_contratto()` e `leggi_chiusa()` |
+| Approvazione scaduta → 409 | la scadenza del timer non lasciava traccia | nucleo: evento `APPROVAL_EXPIRED` con `approval_id`; una decisione tardiva è `already_closed` |
+| `Capabilities` (8) con `setpoint_min/max`, `confirmation` | il nucleo non ha capacità né marche | adattatore (catalogo); il nucleo dà valore, unità, limiti, `online`, `last_seen` (`app/core/dispositivi.py`) |
+| `Health` e `Version` | solo `GET /` | nucleo: `app/core/salute.py` (implementazione, uptime, database, provider); `connector`, `devices`, `status` e 503 sono dell'adattatore |
+| Date UTC con millisecondi, testi in italiano, formato `Error` | date sì (`iso_ms`); `Error` è dell'adattatore (il nucleo risponde `{detail}`) | adattatore per `Error` |
+| Header 401→400→501, `/api/v1`, mappa `x-features` | non sono del nucleo | adattatore |
+
+Scenari `x-conformita` (16): il nucleo permette di passare C01, C03, C05, C07 e C12 con il lavoro dell'adattatore sopra
+(`tenta_comando`, `bus_eventi`, `approvazioni`); C02 (idempotenza 60 s), C04, C06, C08-C11, C13-C16 sono interamente
+dell'adattatore o dei suoi effettori. Mancano nel nucleo solo i punti sopra già chiusi in questa passata.
