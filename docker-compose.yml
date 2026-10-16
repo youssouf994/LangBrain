@@ -10,8 +10,11 @@ services:
       - "${LANGBRAIN_PORT:-8000}:8000"
     environment:
       DB_PATH: /data/langbrain.db
-      # Vuoto: SQLite in /data. Con un URL postgresql://... il database è Postgres (il volume /data non serve più).
-      DATABASE_URL: "${DATABASE_URL:-}"
+      # sqlite (predefinito, volume /data) oppure postgres: con postgres serve LANGBRAIN_DB_URL (postgresql://...).
+      LANGBRAIN_DB_BACKEND: "${LANGBRAIN_DB_BACKEND:-sqlite}"
+      LANGBRAIN_DB_URL: "${LANGBRAIN_DB_URL:-}"
+      # 1: il server non parte senza chiave API (consigliato fuori dallo sviluppo locale).
+      LANGBRAIN_REQUIRE_API_KEY: "${LANGBRAIN_REQUIRE_API_KEY:-0}"
       API_KEY: "${API_KEY:-}"
       API_KEY_PRIMARIO: "${API_KEY_PRIMARIO:-}"
       API_KEY_MEDICO_DI_GUARDIA: "${API_KEY_MEDICO_DI_GUARDIA:-}"

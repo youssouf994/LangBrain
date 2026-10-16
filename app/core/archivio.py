@@ -1,7 +1,7 @@
 """
 Archivio: l'unico punto da cui il core (e i nodi) aprono il database.
 
-SQLite resta il predefinito (un file, `DB_PATH`); con `DATABASE_URL=postgresql://...` lo stesso codice gira su Postgres
+SQLite resta il predefinito (un file, `DB_PATH`); con `LANGBRAIN_DB_BACKEND=postgres` e `LANGBRAIN_DB_URL=postgresql://...` lo stesso codice gira su Postgres
 (Scaleway, Supabase, RDS...). Le query si scrivono con SQLAlchemy Core: i valori viaggiano sempre come parametri legati dal
 driver, mai incollati nel testo SQL, e segnaposto, upsert e tipi sono tradotti dal dialetto, non da codice nostro.
 
@@ -33,29 +33,75 @@ TIMEOUT_DB_SECONDI = 30.0
 _motori: dict[str, AsyncEngine] = {}
 
 
+class ErroreConfigurazioneDb(RuntimeError):
+    """La scelta del database è incompleta o incoerente: l'avvio si ferma con un messaggio chiaro."""
+
+
+BACKEND_SQLITE = "sqlite"
+BACKEND_POSTGRES = "postgres"
+_ALIAS_BACKEND = {"postgresql": BACKEND_POSTGRES, "pg": BACKEND_POSTGRES}
+
+
 def _e_url(valore: str) -> bool:
     return "://" in valore
 
 
+def backend() -> str:
+    """Il database scelto con `LANGBRAIN_DB_BACKEND`: `sqlite` (predefinito) o `postgres`."""
+    grezzo = (os.getenv("LANGBRAIN_DB_BACKEND") or BACKEND_SQLITE).strip().lower()
+    scelto = _ALIAS_BACKEND.get(grezzo, grezzo)
+    if scelto not in (BACKEND_SQLITE, BACKEND_POSTGRES):
+        raise ErroreConfigurazioneDb(
+            f"LANGBRAIN_DB_BACKEND='{grezzo}' non è valido: usa 'sqlite' (predefinito) oppure 'postgres'.")
+    return scelto
+
+
 def url_configurato() -> str | None:
-    """`DATABASE_URL` se impostato (e non vuoto), altrimenti None: il database è il file SQLite di `DB_PATH`."""
-    valore = (os.getenv("DATABASE_URL") or "").strip()
-    return valore or None
+    """
+    L'URL di Postgres (`LANGBRAIN_DB_URL`) se il backend è `postgres`, altrimenti None: il database è il file SQLite di
+    `DB_PATH`. Con `postgres` e senza URL solleva `ErroreConfigurazioneDb`.
+    """
+    if backend() != BACKEND_POSTGRES:
+        return None
+    valore = (os.getenv("LANGBRAIN_DB_URL") or "").strip()
+    if not valore:
+        raise ErroreConfigurazioneDb(
+            "LANGBRAIN_DB_BACKEND=postgres richiede LANGBRAIN_DB_URL (es. postgresql://utente:password@host:5432/database): "
+            "impostalo, oppure torna a SQLite togliendo LANGBRAIN_DB_BACKEND.")
+    return valore
+
+
+def verifica_configurazione() -> None:
+    """
+    Da chiamare all'avvio: rifiuta una scelta di database incompleta (backend sconosciuto, `postgres` senza URL o con un
+    URL che non è Postgres). Con SQLite non c'è nulla da verificare.
+    """
+    url = url_configurato()
+    if url is not None:
+        url_database(_db_path_predefinito())  # solleva se l'URL non è di un database supportato
+        if not e_postgres():
+            raise ErroreConfigurazioneDb("LANGBRAIN_DB_URL deve essere un URL postgresql://...")
+    elif (os.getenv("LANGBRAIN_DB_URL") or "").strip():
+        logger.warning("LANGBRAIN_DB_URL è impostato ma LANGBRAIN_DB_BACKEND non è 'postgres': si usa SQLite (%s).",
+                       _db_path_predefinito())
+
+
+def _db_path_predefinito() -> str:
+    from app.db.database import DB_PATH  # import tardivo: database.py importa questo modulo
+    return DB_PATH
 
 
 def url_database(percorso: str | None = None) -> str:
     """
     L'URL SQLAlchemy asincrono del database.
       - `percorso` è un URL (`postgresql://...`, `sqlite:///...`): è quello;
-      - `percorso` è il file predefinito (`DB_PATH`) o manca, e `DATABASE_URL` è impostato: è `DATABASE_URL`;
+      - `percorso` è il file predefinito (`DB_PATH`) o manca, e il backend è `postgres`: è `LANGBRAIN_DB_URL`;
       - altrimenti `percorso` è un file SQLite.
     """
-    from app.db.database import DB_PATH  # import tardivo: database.py importa questo modulo
-
-    percorso = percorso or DB_PATH
+    percorso = percorso or _db_path_predefinito()
     if _e_url(percorso):
         grezzo = percorso
-    elif percorso == DB_PATH and url_configurato():
+    elif percorso == _db_path_predefinito() and url_configurato():
         grezzo = url_configurato()
     else:
         # Su Windows i `\` rompono l'URL: si usa `/`, che va bene ovunque.
@@ -87,6 +133,15 @@ def _traduci_ssl(resto: str) -> str:
     return urlunsplit(("", parti.netloc, parti.path, urlencode(tradotta), ""))[2:]
 
 
+# Parametro dell'URL di Postgres che isola il database in uno schema (`?lb_schema=nome`): serve ai test, che danno a ogni
+# database temporaneo il suo schema nello stesso database Postgres, e a chi vuole più istanze nello stesso database.
+PARAMETRO_SCHEMA = "lb_schema"
+
+
+def schema_dell_url(url: str) -> str | None:
+    return make_url(url).query.get(PARAMETRO_SCHEMA)
+
+
 def e_postgres(percorso: str | None = None) -> bool:
     return url_database(percorso).startswith("postgresql")
 
@@ -97,6 +152,9 @@ def url_per_psycopg(percorso: str | None = None) -> str:
     if not url.drivername.startswith("postgresql"):
         raise ValueError("L'URL di psycopg esiste solo per Postgres.")
     query = dict(url.query)
+    schema = query.pop(PARAMETRO_SCHEMA, None)
+    if schema:
+        query["options"] = f"-csearch_path={schema}"
     if "ssl" in query:
         valore = query.pop("ssl")
         query["sslmode"] = "disable" if valore == "false" else valore
@@ -122,10 +180,25 @@ def motore(percorso: str | None = None) -> AsyncEngine:
         nuovo = create_async_engine(url, poolclass=NullPool, connect_args={"timeout": TIMEOUT_DB_SECONDI})
         _attiva_pragma_sqlite(nuovo)
     else:
-        nuovo = create_async_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5)
+        schema = schema_dell_url(url)
+        url_driver = make_url(url).difference_update_query([PARAMETRO_SCHEMA]) if schema else url
+        argomenti = {"server_settings": {"search_path": schema}} if schema else {}
+        nuovo = create_async_engine(url_driver, pool_pre_ping=True, pool_size=5, max_overflow=5, connect_args=argomenti)
+        if schema:
+            _crea_schema_al_collegamento(nuovo, schema)
     _motori[url] = nuovo
     logger.info("[Archivio] Motore creato: %s", make_url(url).render_as_string(hide_password=True))
     return nuovo
+
+
+def _crea_schema_al_collegamento(motore_pg: AsyncEngine, schema: str) -> None:
+    @event.listens_for(motore_pg.sync_engine, "connect")
+    def _al_collegamento(connessione_dbapi, _record):
+        cursore = connessione_dbapi.cursor()
+        try:
+            cursore.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')  # `schema` è un identificatore nostro (esadecimale)
+        finally:
+            cursore.close()
 
 
 def _attiva_pragma_sqlite(motore_sqlite: AsyncEngine) -> None:

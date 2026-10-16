@@ -23,6 +23,7 @@ import uvicorn
 from uvicorn.supervisors import Multiprocess
 
 from app.core import riavvio
+from app.core.avvio import ErroreAvvio, verifica_avvio
 
 APP = "app.api.main:app"
 MAX_PROCESSI_AUTOMATICI = 4
@@ -61,6 +62,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--log-level", default="info")
     argomenti = parser.parse_args(argv)
 
+    try:
+        verifica_avvio()  # un messaggio chiaro e nessun processo avviato, invece di N worker che falliscono
+    except ErroreAvvio as errore:
+        raise SystemExit(f"Avvio rifiutato: {errore}") from errore
     processi = processi_richiesti(argomenti.workers)
     os.environ["LANGBRAIN_WORKERS"] = str(processi)  # lo vedono i processi figli: attiva lo stato condiviso
     file = riavvio.file_richiesta()

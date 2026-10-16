@@ -1,7 +1,7 @@
 """
 Checkpointer LangGraph persistente.
 
-Con `DATABASE_URL` (Postgres) usa `AsyncPostgresSaver` su un pool di connessioni; altrimenti `AsyncSqliteSaver` sullo
+Con `LANGBRAIN_DB_BACKEND=postgres` (URL in `LANGBRAIN_DB_URL`) usa `AsyncPostgresSaver` su un pool di connessioni; altrimenti `AsyncSqliteSaver` sullo
 stesso file del database applicativo (`DB_PATH`). In entrambi i casi le tabelle dei checkpoint conservano thread, stato e
 interrupt HITL pendenti, che sopravvivono a riavvii e ricompilazioni del grafo.
 La connessione (o il pool) è dedicata al checkpointer e va aperta nel lifespan dell'applicazione e chiusa allo spegnimento
@@ -81,6 +81,10 @@ async def _apri_postgres(db_path: str):
                                kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
     try:
         await pool.open(wait=True, timeout=TIMEOUT_DB_SECONDI)
+        schema = archivio.schema_dell_url(archivio.url_database(db_path))
+        if schema:  # database isolato in uno schema (test): lo schema esiste prima che il checkpointer crei le tabelle
+            async with pool.connection() as conn:
+                await conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
         saver = AsyncPostgresSaver(pool)
         await saver.setup()
     except Exception:

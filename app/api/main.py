@@ -26,6 +26,7 @@ from pydantic import BaseModel
 
 from app.api.settings_routes import register_routes as register_settings_routes
 from app.agents.agent_registry import AgenteConFigliError, AgentRegistry, ErroreGerarchia
+from app.core.avvio import verifica_avvio
 from app.checkpointer import apri_checkpointer, chiudi_checkpointer, get_checkpointer, svuota_checkpoint
 from app.core import multiprocesso
 from app.core.configurazione import get_configurazione
@@ -146,6 +147,7 @@ async def autentica_e_autorizza(request: Request, chiave: str | None = Security(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    verifica_avvio()  # database e chiave API configurati come richiesto, altrimenti ErroreAvvio
     for avviso in avvisi_configurazione():
         logger.warning(avviso)
     async with multiprocesso.blocco("avvio"):  # più processi: schema e migrazioni si fanno una volta alla volta
