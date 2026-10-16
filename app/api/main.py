@@ -28,6 +28,7 @@ from app.api.settings_routes import register_routes as register_settings_routes
 from app.agents.agent_registry import AgenteConFigliError, AgentRegistry, ErroreGerarchia
 from app.core.avvio import verifica_avvio
 from app.core.contesto import MiddlewareContesto
+from app.core.log_json import configura_log
 from app.checkpointer import apri_checkpointer, chiudi_checkpointer, get_checkpointer, svuota_checkpoint
 from app.core import multiprocesso
 from app.core.configurazione import get_configurazione
@@ -148,6 +149,7 @@ async def autentica_e_autorizza(request: Request, chiave: str | None = Security(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configura_log()  # LANGBRAIN_LOG_FORMAT=json: una riga JSON per evento, senza segreti
     verifica_avvio()  # database e chiave API configurati come richiesto, altrimenti ErroreAvvio
     for avviso in avvisi_configurazione():
         logger.warning(avviso)

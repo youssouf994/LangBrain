@@ -24,6 +24,7 @@ from uvicorn.supervisors import Multiprocess
 
 from app.core import riavvio
 from app.core.avvio import ErroreAvvio, verifica_avvio
+from app.core.log_json import configura_log, configurazione_uvicorn
 
 APP = "app.api.main:app"
 MAX_PROCESSI_AUTOMATICI = 4
@@ -72,7 +73,11 @@ def main(argv: list[str] | None = None) -> int:
     os.environ[riavvio.VARIABILE_FILE] = str(file)
     file.unlink(missing_ok=True)
 
-    config = uvicorn.Config(APP, host=argomenti.host, port=argomenti.port, workers=processi, log_level=argomenti.log_level)
+    extra = {}
+    if configura_log():  # LANGBRAIN_LOG_FORMAT=json: anche i log di uvicorn escono in JSON
+        extra["log_config"] = configurazione_uvicorn()
+    config = uvicorn.Config(APP, host=argomenti.host, port=argomenti.port, workers=processi, log_level=argomenti.log_level,
+                            **extra)
     esito: dict = {}
     sock = config.bind_socket()
     if processi > 1:

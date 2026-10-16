@@ -79,6 +79,16 @@ class MiddlewareTest(unittest.TestCase):
         self.assertNotEqual(r.json()["correlation_id"], "x" * 300)
 
 
+class AppVeraTest(unittest.TestCase):
+    def test_l_api_del_nucleo_restituisce_e_rispetta_il_correlation_id(self):
+        from app.api.main import app
+        client = TestClient(app)
+        r = client.get("/", headers={"X-Correlation-Id": "cid-api-1"})
+        self.assertEqual(r.headers["X-Correlation-Id"], "cid-api-1")
+        generato = client.get("/").headers["X-Correlation-Id"]
+        self.assertEqual(str(uuid.UUID(generato, version=4)), generato)
+
+
 class ContestoTest(unittest.TestCase):
     def test_fatto_interno_ha_un_id_proprio_e_ripristina(self):
         with contesto.contesto("esterno", "user:a@b.it"):
