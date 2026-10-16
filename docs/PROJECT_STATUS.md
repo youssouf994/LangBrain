@@ -2,11 +2,11 @@
 
 🇮🇹 Italiano | 🇬🇧 [English](PROJECT_STATUS.en.md)
 
-Aggiornato il 2026-09-20. La versione precedente di questo documento era un audit statico con l'elenco dei difetti trovati; quei difetti sono stati corretti (la cronologia Git conserva l'audit originale) e qui resta lo stato attuale, i limiti noti e la roadmap.
+Aggiornato il 2026-10-16. La versione precedente di questo documento era un audit statico con l'elenco dei difetti trovati; quei difetti sono stati corretti (la cronologia Git conserva l'audit originale) e qui resta lo stato attuale, i limiti noti e la roadmap.
 
 ## Sintesi
 
-LangBrain è un boilerplate funzionante per sistemi di agenti gerarchici su LangGraph, con un dominio dimostrativo (smart home) e uno di prova (omeostasi medica). Il ciclo completo Brain → organi → componenti, le escalation, l'approvazione dell'operatore, l'API, la persistenza su SQLite o Postgres, la sicurezza di base e la documentazione sono in ordine e coperti da test. **Non è pronto per la produzione**: gira con un solo worker, lo stato fisico dei dispositivi (simulati) è in memoria, manca l'observability. I limiti sono elencati sotto.
+LangBrain è un boilerplate funzionante per sistemi di agenti gerarchici su LangGraph, con un dominio dimostrativo (smart home) e uno di prova (omeostasi medica), nominato con il vocabolario del corpo (Brain → Organ → Tissue → Cell; `Reflex`, `Receptor`, `Effector`, `NervousSystem`) e capace di ospitare nodi come estensioni (`app/nodes`). Il ciclo completo Brain → organi → tessuti → cellule, le escalation, l'approvazione dell'operatore, l'API, la persistenza su SQLite o Postgres, la sicurezza di base e la documentazione sono in ordine e coperti da test. **Non è pronto per la produzione**: gira con un solo worker per impostazione predefinita (più worker con `python -m app.serve`), gli effettori sono simulati e il loro stato fisico non è riconciliato dopo un riavvio, mancano metriche e tracing. I limiti sono elencati sotto.
 
 ## Cosa c'è ed è verificato
 
@@ -27,7 +27,7 @@ LangBrain è un boilerplate funzionante per sistemi di agenti gerarchici su Lang
 | Pagina impostazioni | `/config`: modifica `.env` e `configurazione.toml` (e i file dei nodi installati); l'amministratore può riavviare l'app. |
 | Estensioni | `app/nodes/`: un nodo si aggancia all'API (rotte, pagine, impostazioni, prompt) senza che il core lo conosca. |
 | Dipendenze | Versioni esatte in `requirements.txt`, elenco completo in `requirements.lock`; `pip-audit` non trova vulnerabilità note. |
-| Test | `python -m pytest tests`: database temporanei, nessun LLM reale, i database veri non vengono mai toccati. Prove per mutazione sui punti critici; prove reali con Mistral/OpenRouter/Gemini eseguite a mano durante lo sviluppo. |
+| Test | `python -m pytest tests`: database temporanei, nessun LLM reale, i database veri non vengono mai toccati. `python -m pytest tests_windows` (2026-10-16): 649 passati, 10 saltati, 0 falliti. Prove per mutazione sui punti critici; prove reali con Mistral/OpenRouter/Gemini eseguite a mano durante lo sviluppo. |
 | CI e sicurezza | `.github/workflows/ci.yml`, verde su GitHub su `main` (commit `a9cccc2`, tag `poc-contratto-1.0.4-rc2`): test SQLite su Python 3.12 e 3.14, intera suite su Postgres 16 (`tests/pg_isolamento.py`), **build dell'immagine Docker con avvio** e rifiuto dell'avvio senza chiave, gitleaks e pip-audit (`scripts/scansione_sicurezza.sh`). Il job `conformita` (suite del contratto) è disabilitato: vive nel fork di HQ. Più `SECURITY.md`, `CONTRIBUTING.md`. |
 | Docker | `Dockerfile` e `docker-compose.yml` (volume SQLite o `LANGBRAIN_DB_BACKEND`/`LANGBRAIN_DB_URL` per Postgres, health check, `python -m app.serve` con `LANGBRAIN_WORKERS` worker). L'immagine è stata costruita e provata (2026-10-15) con 3 worker contro Postgres: avvio, agenti, modelli, eventi, statistiche, HITL, checkpoint, riavvio e reset funzionano. |
 
@@ -35,7 +35,7 @@ LangBrain è un boilerplate funzionante per sistemi di agenti gerarchici su Lang
 
 - **Più worker condividono lo stato nel database (SQLite o Postgres)** (`python -m app.serve`, `app/core/multiprocesso.py`): compiti in background in un processo alla volta, configurazione HITL a runtime, valori degli effettori simulati, interruttori dei tool e grafo compilato condivisi. Non condivisi: i guasti simulati e l'unico thread `api_session` del grafo dimostrativo (le esecuzioni si mettono in fila). `python -m uvicorn` resta un processo solo.
 - **Stato fisico dei tool in memoria**, non riconciliato con il DB al riavvio; i tool sono simulati (nessun adapter hardware, MQTT o webhook).
-- **Dati non usati o non limitati**: la tabella `readings` non viene popolata; `GraphState.reduce_readings` accumula senza finestra temporale.
+- **Segnali**: i valori numerici dei segnali finiscono nella tabella `signals` (`NervousSystem.record_signals`) e `reduce_readings` scarta quelli oltre la finestra (`[signals] window_hours`, 4 ore). La tabella `readings` è un residuo del nome vecchio: resta nello schema ma non viene né scritta né letta (la svuota solo `DELETE /system/reset`), e la chiave `readings` dello stato del grafo mantiene il nome storico.
 - **Registro eventi**: timestamp al millisecondo generati dall'applicazione (campo `ts` in ISO 8601 UTC) e ordine garantito dall'`event_id` crescente; ogni decisione porta `correlation_id`, `outcome`, `command_id`, `approval_id`. Gli errori DB in `mark_resolved`, `unblock_target` e TTL vengono rilanciati: `/events/unblock` e `/events/reset-conflicts` rispondono 503 senza toccare il dispositivo, il Brain completa il ciclo e avvisa l'operatore che l'escalation è rimasta aperta.
 - **Provider gratuiti**: i modelli gratuiti hanno limiti di richieste e crediti; quando finiscono il grafo si ferma per l'operatore (comportamento voluto), oppure si abilita il ripiego in `configurazione.toml`.
 - **Observability**: correlation id e attore per richiesta (`X-Correlation-Id`, `X-Actor`, `app/core/contesto.py`) e log JSON opzionale (`LANGBRAIN_LOG_FORMAT=json`, senza segreti). Nessuna metrica o trace. Nessun WebSocket (lo streaming è a Server-Sent Events).
@@ -96,7 +96,7 @@ Le dipendenze sono fissate (2026-09-20):
 - [ ] Persistenza dello stato fisico dei tool e adapter hardware.
 - [ ] Scheduler robusto per health check e TTL.
 - [x] Funzionamento multi-worker (stato condiviso nel database, SQLite o Postgres; un backend di dispositivi reali sostituirebbe gli effettori simulati).
-- [ ] Dashboard operatore completa (la pagina `/demo` è solo dimostrativa).
+- [ ] Dashboard operatore completa nel core (la pagina `/demo` è solo dimostrativa; un nodo può aggiungere le sue pagine come estensione).
 - [ ] Test di concorrenza e di carico.
 
 ## Allineamento al contratto 1.0.4 (2026-10-16)

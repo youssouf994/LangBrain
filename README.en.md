@@ -3,7 +3,7 @@
 # 🤖 LangBrain
 
 > [!WARNING]
-> **LangBrain is a working boilerplate, but it is not production-ready:** a single worker, simulated devices with in-memory state, no observability. Known limits and the roadmap are in [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md).
+> **LangBrain is a working boilerplate, but it is not production-ready:** simulated devices (no real hardware adapter), no metrics or tracing, no WebSocket. Known limits and the roadmap are in [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md).
 
 **A digital body for your intelligent automation and hierarchical-agent projects.**
 
@@ -54,11 +54,11 @@ A real body does not stop at “brain + organs.” When viewed closely, each org
   │
   ├── 🔒 Security Organ (Level 1)
   │      │
-  │      └── 🔑 Lock Component (Level 2)
+  │      └── 🔑 Lock Tissue (Level 2)
   │
   └── ❤️ Cardiovascular Organ (Level 1)
        │
-       └── 🫀 Heart Rate Component (Level 2)
+       └── 🫀 Heart Rate Tissue (Level 2)
 ```
 
 In practice, **every graph node can in turn act as a small brain for the level below it.** The same `base_agent.py`, the same `DynamicAgent`, and the same audit-log mechanism apply recursively, whether coordinating two main organs or twenty subcomponents nested across N levels.
@@ -104,8 +104,8 @@ The core is an API: everything the framework does is a REST call, including the 
     └──────┬──────┘  └──────┬──────┘  └──────┬───────┘
       │                │                │
     ┌──────▼──────┐  ┌──────▼──────┐  ┌──────▼───────┐
-    │ Sensors/    │  │ Component   │  │ Component    │
-    │ Actuators   │  │ Lock L2     │  │ Pacemaker L2 │
+    │ Receptors/  │  │ Tissue      │  │ Tissue       │
+    │ Effectors   │  │ Lock L2     │  │ Pacemaker L2 │
     └─────────────┘  └─────────────┘  └──────────────┘
 
     ═══════════════════════════════════════════════
@@ -117,9 +117,9 @@ The core is an API: everything the framework does is a REST call, including the 
 
 It has maximum privileges (priority `1000.0`). It receives escalations from sub-agents when unresolvable conflicts arise and performs the entire system's routine check (`check_body_status`).
 
-### The Organs and Components (`DynamicAgent` & `BaseAgent`)
+### Organs, Tissues and Cells (`DynamicAgent` & `BaseAgent`)
 
-They act autonomously on their sensor/device targets. If they detect a conflict in the DB or a severe anomaly (such as cardiac arrhythmia or suspicious unlocking), they generate a structured escalation to their Parent agent.
+They act autonomously on their targets (receptor or effector). If they detect a conflict in the DB or a severe anomaly (such as cardiac arrhythmia or suspicious unlocking), they generate a structured escalation to their Parent agent.
 
 ---
 
@@ -172,29 +172,44 @@ LangBrain/
 ├── .env.example                    # Template of the secrets (provider and API keys); your .env stays out of Git
 ├── configurazione.toml             # User choices: effectors and accepted values, LLM providers, HITL, signals (config.example.toml: English version)
 ├── run_loop.py                     # Event-driven loop with a producer of sensor events
-├── .github/workflows/ci.yml        # CI: tests on Python 3.12/3.14, secret and dependency scan
+├── docker-compose.test.yml         # Throw-away Postgres for the suite (port 55433)
+├── .github/workflows/ci.yml        # CI: SQLite on Python 3.12/3.14, suite on Postgres 16, Docker build, secret and dependency scan
 ├── app/
 │   ├── MAO/
 │   │   └── model_access_object.py  # Model Access Object (OpenRouter, Google AI Studio, Mistral, local LLM)
 │   ├── agents/
 │   │   ├── base_agent.py           # Common DNA of every agent (applies state, priorities, escalation)
 │   │   ├── dynamic_agent.py        # Agent configurable at runtime (Levels 1..N), one model call per cycle
-│   │   ├── agent_registry.py       # Hierarchical registry on SQLite
+│   │   ├── agent_registry.py       # Hierarchical registry (SQLite or Postgres)
 │   │   ├── agenti_nativi.py        # Loads the native example agents from examples/ by name
 │   │   └── agent_climate.py, medical_agents.py   # Aliases of the old paths (now in examples/)
 │   ├── core/
+│   │   ├── approvazioni.py         # HITL approvals as objects with a stable `approval_id` (approve/reject)
+│   │   ├── archivio.py             # Single entry point to the database (SQLAlchemy Core, SQLite or Postgres)
+│   │   ├── avvio.py                # Startup checks (database, keys); start refused when the configuration is incomplete
+│   │   ├── bus_eventi.py           # Event bus with a persisted monotonic id, `Last-Event-ID` and buffer
+│   │   ├── comandi.py              # `tenta_comando`: a command from outside the graph with a structured outcome
 │   │   ├── configurazione.py       # Reading and validation of configurazione.toml (Italian or English names)
+│   │   ├── conservazione.py        # Data retention, off by default
 │   │   ├── constants.py            # Control flags, TTL, level names (Brain, Organ, Tissue, Cell)
+│   │   ├── contesto.py             # Correlation id and actor per request (`X-Correlation-Id`, `X-Actor`)
+│   │   ├── decisioni.py            # Decision log in the contract's shape, with cursor search
+│   │   ├── dispositivi.py          # Effector description (value, unit, limits, online, last_seen)
 │   │   ├── errori_llm.py           # Classified model errors (tokens, key, limits) and secret masking
 │   │   ├── estensioni.py           # How a node plugs into the API (routes, pages, settings, prompts)
+│   │   ├── idempotenza.py          # `esegui_una_volta`: same key = a single execution, also across processes
 │   │   ├── lingua.py               # Language of prompts, messages and pages (it, en)
+│   │   ├── log_json.py             # Optional JSON logs, no secrets
 │   │   ├── modelli_agenti.py       # LLM model per agent, inherited from the parent
+│   │   ├── multiprocesso.py        # State shared between workers (tables `runtime_state` and `leases`)
 │   │   ├── pagine_web.py           # Localised web pages (texts in app/static/i18n, shared theme)
 │   │   ├── priorita.py             # Priority rules for locks
 │   │   ├── prompt.py               # Configurable prompts (customisable role, answer format in the code)
+│   │   ├── registro_accessi.py     # Filter of uvicorn's access log (no line for successful requests)
 │   │   ├── riavvio.py              # Restart of the application from the /config page (admin only)
 │   │   ├── risultati.py            # Structured outcome of tool reading/actuation
 │   │   ├── ruoli.py                # Roles of API callers and permission matrix
+│   │   ├── salute.py               # Health and version pieces (implementation, uptime, database, providers)
 │   │   └── settings_editor.py      # Editor of .env and configurazione.toml behind the /config page
 │   ├── graph/
 │   │   ├── orchestrator.py         # Brain (BrainAgent - Level 0), one call for all the escalations of the cycle
@@ -211,7 +226,8 @@ LangBrain/
 │   │   ├── statistiche_grafo.py    # Statistics for charts: graph nodes and signals over time
 │   │   └── baseTool.py, sensor_tools.py, event_log.py, tool_wrapper.py, medical_tools.py   # Aliases of the old names
 │   ├── db/
-│   │   ├── database.py             # SQLite schema (events, signals, node_runs, ...)
+│   │   ├── database.py             # Initialisation and additive migrations (SQLite or Postgres)
+│   │   ├── schema.py               # Table schema (events, signals, node_runs, ...)
 │   │   └── scenario.py             # Reproducible data scenarios
 │   ├── api/
 │   │   ├── main.py                 # FastAPI REST API (graph, streaming, HITL, agents, effectors, events, statistics)
@@ -222,7 +238,8 @@ LangBrain/
 │   │   ├── config.html             # Settings page, served on GET /config
 │   │   ├── settings_form.js, common.css   # Form module and theme shared by the pages
 │   │   └── i18n/                   # Page texts in Italian and English
-│   └── checkpointer.py             # Persistent LangGraph checkpointer on SQLite
+│   ├── serve.py                    # `python -m app.serve`: uvicorn supervisor with several workers
+│   └── checkpointer.py             # Persistent LangGraph checkpointer (SQLite or Postgres)
 ├── examples/
 │   ├── avvia_demo.py               # Server + test scenario + web page of the graph
 │   ├── crea_scenario.py            # Resets a database and creates a test scenario
@@ -238,6 +255,7 @@ LangBrain/
 └── docs/
     ├── HOW_TO_CUSTOMIZE.md / .en.md # Customisation guide, API map, extensions
     ├── PROJECT_STATUS.md / .en.md  # Project status, known limits and roadmap
+    ├── ROLLBACK.md                 # How to go back from Postgres to SQLite (Italian)
     ├── API_SMOKE_TEST.md           # API smoke test with curl (Bash)
     └── API_SMOKE_TEST_WINDOWS.ps1  # API smoke test for PowerShell
 ```
@@ -251,7 +269,7 @@ LangBrain/
 | Agent Framework | **LangGraph** | Stateful graphs with cycles, conditional routing, and native checkpointing |
 | LLM Provider | **MAO Proxy** | OpenRouter, Google AI Studio (Gemini), Mistral and local LLMs (vLLM, LM Studio), with a model per agent |
 | API Server | **FastAPI** | Fully headless asynchronous HTTP/REST server with interactive Swagger UI |
-| Database | **SQLite (aiosqlite)** | Zero setup, persistent event audit log, agent registry, and state |
+| Database | **SQLite** (default) or **Postgres** (`LANGBRAIN_DB_BACKEND=postgres`), through SQLAlchemy | Zero setup locally; Postgres for deployments with an ephemeral filesystem (Scaleway, Supabase...). Persistent audit log, agent registry and state |
 
 ---
 

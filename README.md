@@ -3,7 +3,7 @@
 # 🤖 LangBrain
 
 > [!WARNING]
-> **LangBrain è un boilerplate funzionante, ma non è pronto per la produzione:** un solo worker, dispositivi simulati con stato in memoria, nessuna observability. I limiti noti e la roadmap sono in [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md).
+> **LangBrain è un boilerplate funzionante, ma non è pronto per la produzione:** dispositivi simulati (nessun adattatore hardware reale), nessuna metrica né tracing, nessun WebSocket. I limiti noti e la roadmap sono in [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md).
 
 **Un corpo digitale per i tuoi progetti di automazione intelligente ed agenti gerarchici.**
 
@@ -53,11 +53,11 @@ Un vero corpo non si ferma a "cervello + organi". Ogni organo, se lo guardi da v
    │
    ├── 🔒 Organo Sicurezza (Livello 1)
    │      │
-   │      └── 🔑 Componente Serratura (Livello 2)
+   │      └── 🔑 Tessuto Serratura (Livello 2)
    │
    └── ❤️ Organo Cardiovascolare (Livello 1)
           │
-          └── 🫀 Componente Frequenza Cardiaca (Livello 2)
+          └── 🫀 Tessuto Frequenza Cardiaca (Livello 2)
 ```
 
 In pratica: **ogni nodo del grafo può essere, a sua volta, un piccolo cervello per il livello sottostante.** Lo stesso `base_agent.py`, lo stesso `DynamicAgent`, ed il meccanismo di audit log si applicano in modo ricorsivo sia coordinando 2 organi principali che 20 sotto-componenti innestati su N livelli.
@@ -70,7 +70,7 @@ I nomi pubblici del framework sono quelli del corpo umano, così lo stesso core 
 
 | Parte | Significato |
 |---|---|
-| **Brain · Organ · Tissue · Cell** | gli agenti che usano un modello, per livello della gerarchia |
+| **Brain · Organ · Tissue · Cell** | gli agenti che usano un modello, per livello della gerarchia (0, 1, 2, 3 e oltre) |
 | **Reflex** (`app.tools.reflex`) | azione deterministica, senza modello e senza decisione |
 | **Receptor** | trasforma uno stimolo esterno in un **segnale**; può usare un modello ma non decide nulla |
 | **Effector** (`[effectors.*]`, `/effectors`) | ciò che agisce sul mondo; `SimulatedEffector` è quello in memoria |
@@ -103,8 +103,8 @@ Il core è un'API: tutto ciò che fa il framework è una chiamata REST, anche le
               └──────┬──────┘  └──────┬──────┘  └──────┬───────┘
                      │                │                │
               ┌──────▼──────┐  ┌──────▼──────┐  ┌──────▼───────┐
-              │ Sensori/    │  │ Componente  │  │ Componente   │
-              │ Attuatori   │  │ Serratura L2│  │ Pacemaker L2 │
+              │ Recettori/  │  │ Tessuto     │  │ Tessuto      │
+              │ Effettori   │  │ Serratura L2│  │ Pacemaker L2 │
               └─────────────┘  └─────────────┘  └──────────────┘
 
               ═══════════════════════════════════════════════
@@ -115,8 +115,8 @@ Il core è un'API: tutto ciò che fa il framework è una chiamata REST, anche le
 ### Il Cervello (Orchestratore Supremo)
 Possiede i privilegi massimi (priorità `1000.0`). Riceve le escalation dei sotto-agenti quando scattano conflitti non risolvibili ed esegue il check di routine dell'intero sistema (`check_body_status`).
 
-### Gli Organi e Componenti (`DynamicAgent` & `BaseAgent`)
-Agiscono in autonomia per il loro target sensore/dispositivo. Se rilevano un conflitto nel DB o un'anomalia severa (es. aritmia cardiaca o sblocco sospetto), generano un'escalation strutturata verso il loro agente Padre.
+### Organi, Tessuti e Cellule (`DynamicAgent` & `BaseAgent`)
+Agiscono in autonomia per il loro target (recettore o effettore). Se rilevano un conflitto nel DB o un'anomalia severa (es. aritmia cardiaca o sblocco sospetto), generano un'escalation strutturata verso il loro agente Padre.
 
 ---
 
@@ -169,7 +169,8 @@ LangBrain/
 ├── .env.example                    # Template dei segreti (chiavi dei provider e dell'API); il tuo .env resta fuori da Git
 ├── configurazione.toml             # Scelte dell'utente: effettori e valori ammessi, provider LLM, HITL, segnali (config.example.toml: versione inglese)
 ├── run_loop.py                     # Loop event-driven con produttore di eventi dei sensori
-├── .github/workflows/ci.yml        # CI: test su Python 3.12/3.14, scansione segreti e dipendenze
+├── docker-compose.test.yml         # Postgres usa e getta per la suite (porta 55433)
+├── .github/workflows/ci.yml        # CI: SQLite su Python 3.12/3.14, suite su Postgres 16, build Docker, scansione segreti e dipendenze
 ├── app/
 │   ├── MAO/
 │   │   └── model_access_object.py  # Model Access Object (OpenRouter, Google AI Studio, Mistral, LLM locale)
@@ -180,18 +181,32 @@ LangBrain/
 │   │   ├── agenti_nativi.py        # Carica per nome gli agenti nativi di esempio da examples/
 │   │   └── agent_climate.py, medical_agents.py   # Alias dei vecchi percorsi (ora in examples/)
 │   ├── core/
+│   │   ├── approvazioni.py         # Approvazioni HITL come oggetti con `approval_id` stabile (approve/reject)
+│   │   ├── archivio.py             # Unico punto d'accesso al database (SQLAlchemy Core, SQLite o Postgres)
+│   │   ├── avvio.py                # Controlli all'avvio (database, chiavi) e rifiuto se la configurazione è incompleta
+│   │   ├── bus_eventi.py           # Bus di eventi con id monotono persistito, `Last-Event-ID` e buffer
+│   │   ├── comandi.py              # `tenta_comando`: comando dall'esterno del grafo con esito strutturato
 │   │   ├── configurazione.py       # Lettura e validazione di configurazione.toml (nomi italiani o inglesi)
+│   │   ├── conservazione.py        # Conservazione dei dati (retention), spenta di predefinito
 │   │   ├── constants.py            # Flag di controllo, TTL, nomi dei livelli (Brain, Organ, Tissue, Cell)
+│   │   ├── contesto.py             # Correlation id e attore per richiesta (`X-Correlation-Id`, `X-Actor`)
+│   │   ├── decisioni.py            # Registro delle decisioni nella forma del contratto, con ricerca a cursore
+│   │   ├── dispositivi.py          # Descrizione degli effettori (valore, unità, limiti, online, last_seen)
 │   │   ├── errori_llm.py           # Errori del modello classificati (token, chiave, limiti) e oscuramento segreti
 │   │   ├── estensioni.py           # Come un nodo si aggancia all'API (rotte, pagine, impostazioni, prompt)
+│   │   ├── idempotenza.py          # `esegui_una_volta`: stessa chiave = una sola esecuzione, anche tra processi
 │   │   ├── lingua.py               # Lingua dei prompt, dei messaggi e delle pagine (it, en)
+│   │   ├── log_json.py             # Log JSON opzionale, senza segreti
 │   │   ├── modelli_agenti.py       # Modello LLM per singolo agente, con ereditarietà dal padre
+│   │   ├── multiprocesso.py        # Stato condiviso tra più worker (tabelle `runtime_state` e `leases`)
 │   │   ├── pagine_web.py           # Pagine web localizzate (testi in app/static/i18n, tema comune)
 │   │   ├── priorita.py             # Regole di priorità dei blocchi
 │   │   ├── prompt.py               # Prompt configurabili (ruolo personalizzabile, formato di risposta nel codice)
+│   │   ├── registro_accessi.py     # Filtro del log di accesso di uvicorn (niente righe per le richieste riuscite)
 │   │   ├── riavvio.py              # Riavvio dell'applicazione dalla pagina /config (solo amministratore)
 │   │   ├── risultati.py            # Esito strutturato di lettura/attuazione dei tool
 │   │   ├── ruoli.py                # Ruoli di chi chiama l'API e matrice dei permessi
+│   │   ├── salute.py               # Pezzi di health e versione (implementazione, uptime, database, provider)
 │   │   └── settings_editor.py      # Editor di .env e configurazione.toml dietro la pagina /config
 │   ├── graph/
 │   │   ├── orchestrator.py         # Cervello (BrainAgent - Livello 0), una chiamata per tutte le escalation del ciclo
@@ -208,7 +223,8 @@ LangBrain/
 │   │   ├── statistiche_grafo.py    # Statistiche per i grafici: nodi del grafo e segnali nel tempo
 │   │   └── baseTool.py, sensor_tools.py, event_log.py, tool_wrapper.py, medical_tools.py   # Alias dei vecchi nomi
 │   ├── db/
-│   │   ├── database.py             # Schema (SQLite o Postgres: events, signals, node_runs, ...)
+│   │   ├── database.py             # Inizializzazione e migrazioni additive (SQLite o Postgres)
+│   │   ├── schema.py               # Schema delle tabelle (events, signals, node_runs, ...)
 │   │   └── scenario.py             # Scenari di dati riproducibili
 │   ├── api/
 │   │   ├── main.py                 # API REST FastAPI (grafo, streaming, HITL, agenti, effettori, eventi, statistiche)
@@ -219,6 +235,7 @@ LangBrain/
 │   │   ├── config.html             # Pagina delle impostazioni, servita su GET /config
 │   │   ├── settings_form.js, common.css   # Modulo del form e tema comuni alle pagine
 │   │   └── i18n/                   # Testi delle pagine in italiano e inglese
+│   ├── serve.py                    # `python -m app.serve`: supervisore uvicorn con più worker
 │   └── checkpointer.py             # Checkpointer LangGraph persistente (SQLite o Postgres)
 ├── examples/
 │   ├── avvia_demo.py               # Server + scenario di prova + pagina web del grafo
@@ -235,6 +252,7 @@ LangBrain/
 └── docs/
     ├── HOW_TO_CUSTOMIZE.md / .en.md # Guida alla personalizzazione, mappatura API, estensioni
     ├── PROJECT_STATUS.md / .en.md  # Stato del progetto, limiti noti e roadmap
+    ├── ROLLBACK.md                 # Come tornare da Postgres a SQLite
     ├── API_SMOKE_TEST.md           # Smoke test dell'API con curl (Bash)
     └── API_SMOKE_TEST_WINDOWS.ps1  # Smoke test dell'API per PowerShell
 ```
