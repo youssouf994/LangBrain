@@ -19,7 +19,7 @@ from typing import Awaitable, Callable
 
 from sqlalchemy import delete
 
-from app.core import archivio
+from app.core import archivio, bus_eventi
 from app.db import schema
 
 logger = logging.getLogger(__name__)
@@ -81,6 +81,10 @@ async def pulisci_eventi(giorni: int, db_path: str | None = None) -> int:
 async def esegui_pulizie(db_path: str | None = None) -> dict[str, int]:
     """Un giro di pulizia. Restituisce quante righe ha tolto ciascuna (`eventi` e il nome di ogni pulizia dei comandi)."""
     tolte: dict[str, int] = {}
+    try:  # il buffer del flusso di eventi è effimero: si pulisce sempre (almeno un'ora di eventi resta)
+        tolte["stream"] = await bus_eventi.pulisci_buffer(db_path)
+    except Exception:
+        logger.exception("Pulizia del buffer del flusso di eventi non riuscita.")
     giorni = giorni_eventi()
     if giorni:
         try:

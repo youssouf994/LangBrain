@@ -102,6 +102,18 @@ node_runs = Table(
     sqlite_autoincrement=True,
 )
 
+# Bus degli eventi in tempo reale (vedi `app/core/bus_eventi.py`): l'id cresce sempre e non viene mai riusato.
+stream_events = Table(
+    "stream_events", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("event", Text, nullable=False),
+    Column("ts", Text, nullable=False),
+    Column("apartment_id", Text, nullable=False, server_default=text("''")),
+    Column("correlation_id", Text),
+    Column("data", Text, nullable=False, server_default=text("'{}'")),
+    sqlite_autoincrement=True,
+)
+
 # Stato condiviso tra processi e contratti di affitto (vedi `app/core/multiprocesso.py`)
 runtime_state = Table(
     "runtime_state", metadata,

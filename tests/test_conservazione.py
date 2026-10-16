@@ -72,7 +72,7 @@ class PulizieTest(unittest.IsolatedAsyncioTestCase):
         await self.evento(1000)
         self.assertEqual(await conservazione.pulisci_eventi(0, self.db), 0)
         with _ambiente():
-            self.assertEqual(await conservazione.esegui_pulizie(self.db), {})
+            self.assertEqual(await conservazione.esegui_pulizie(self.db), {"stream": 0})
         self.assertEqual(await self.conta(), 1)
 
     async def test_un_giro_pulisce_eventi_e_comandi_con_i_giorni_giusti(self):
@@ -87,7 +87,7 @@ class PulizieTest(unittest.IsolatedAsyncioTestCase):
         conservazione.registra_pulizia_comandi("comandi_x", comandi_x)
         with _ambiente(**{conservazione.VARIABILE_EVENTI: "90", conservazione.VARIABILE_COMANDI: "7"}):
             tolte = await conservazione.esegui_pulizie(self.db)
-        self.assertEqual(tolte, {"eventi": 1, "comandi_x": 3})
+        self.assertEqual(tolte, {"stream": 0, "eventi": 1, "comandi_x": 3})
         self.assertEqual(chiamate, [7])
         self.assertEqual(await self.conta(), 1)
 
@@ -114,7 +114,7 @@ class PulizieTest(unittest.IsolatedAsyncioTestCase):
         conservazione.registra_pulizia_comandi("ok", ok)
         with _ambiente(**{conservazione.VARIABILE_COMANDI: "7"}):
             tolte = await conservazione.esegui_pulizie(self.db)
-        self.assertEqual(tolte, {"ok": 2})
+        self.assertEqual(tolte, {"stream": 0, "ok": 2})
 
     async def test_la_pulizia_non_tocca_le_decisioni_recenti_con_ids_collegati(self):
         recente = await self.log.log_event("a", "X", "t", "1", "2", "r", command_id="c1", correlation_id="cid")
