@@ -1,0 +1,4 @@
+# Falsi positivi noti di gitleaks: valori finti di MISTRAL_API_KEY in un test (ramo feature/simulazione-energia, commit 44c70e1).
+# Formato: commit:file:regola:riga
+44c70e1ee8454a21dca7c2d7aa5952845591bde8:tests/test_errori_llm.py:generic-api-key:236
+44c70e1ee8454a21dca7c2d7aa5952845591bde8:tests/test_errori_llm.py:generic-api-key:248
