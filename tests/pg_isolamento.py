@@ -81,6 +81,14 @@ def installa() -> None:
     archivio.create_async_engine = crea_senza_pool
 
 
+def prima_di_ogni_test() -> None:
+    """Dimentica i motori del test precedente (senza pool non hanno connessioni da chiudere): ognuno riparte dal suo event loop."""
+    if attivo():
+        from app.core import archivio
+
+        archivio._motori.clear()
+
+
 def segna_test_non_adatti(items) -> None:
     if not attivo():
         return

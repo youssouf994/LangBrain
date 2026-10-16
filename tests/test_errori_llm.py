@@ -187,8 +187,11 @@ class RicaricaEnvTest(unittest.IsolatedAsyncioTestCase):
     def scrivi(self, contenuto):
         with open(self.file_env, "w") as f:
             f.write(contenuto)
+        # Data di modifica esplicita e sempre crescente: due scritture ravvicinate possono avere la stessa data
+        # (i file system hanno una risoluzione limitata) e il MAO non vedrebbe il cambiamento.
+        self._scritture = getattr(self, "_scritture", 0) + 1
         stat = os.stat(self.file_env)
-        os.utime(self.file_env, ns=(stat.st_atime_ns, stat.st_mtime_ns + 5_000_000_000))
+        os.utime(self.file_env, ns=(stat.st_atime_ns, stat.st_mtime_ns + self._scritture * 5_000_000_000))
 
     def test_applica_solo_le_variabili_cambiate_nel_file(self):
         self.scrivi("OPENROUTER_MODEL=modello-b\nDEFAULT_PROVIDER=openrouter\n")

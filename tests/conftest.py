@@ -41,5 +41,9 @@ def pytest_collection_modifyitems(items):
     pg_isolamento.segna_test_non_adatti(items)
 
 
+def pytest_runtest_setup(item):
+    pg_isolamento.prima_di_ogni_test()
+
+
 def pytest_sessionfinish(session, exitstatus):
     pg_isolamento.pulisci()

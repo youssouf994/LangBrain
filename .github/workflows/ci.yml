@@ -86,9 +86,10 @@ jobs:
           exit 1
       - name: Senza chiave API il contenitore si rifiuta di partire (LANGBRAIN_REQUIRE_API_KEY=1)
         run: |
-          if docker run --rm -e LANGBRAIN_REQUIRE_API_KEY=1 -e API_KEY= langbrain:ci 2>&1 | tee uscita.txt; then
-            echo "Doveva rifiutare l'avvio"; exit 1
+          if docker run --rm -e LANGBRAIN_REQUIRE_API_KEY=1 -e API_KEY= langbrain:ci > uscita.txt 2>&1; then
+            cat uscita.txt; echo "Doveva rifiutare l'avvio"; exit 1
           fi
+          cat uscita.txt
           grep -q "Avvio rifiutato" uscita.txt
 
   sicurezza:
