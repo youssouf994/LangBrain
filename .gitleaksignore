@@ -2,3 +2,6 @@
 # Formato: commit:file:regola:riga
 44c70e1ee8454a21dca7c2d7aa5952845591bde8:tests/test_errori_llm.py:generic-api-key:236
 44c70e1ee8454a21dca7c2d7aa5952845591bde8:tests/test_errori_llm.py:generic-api-key:248
+# Stessi due valori finti di MISTRAL_API_KEY dopo il cherry-pick su main (commit c77eeb5; i vecchi hash 44c70e1 restano per il ramo feature/simulazione-energia).
+c77eeb54ee1e5098a6395cc541d89ede7fa467d1:tests/test_errori_llm.py:generic-api-key:239
+c77eeb54ee1e5098a6395cc541d89ede7fa467d1:tests/test_errori_llm.py:generic-api-key:251
