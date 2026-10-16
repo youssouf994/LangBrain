@@ -92,6 +92,8 @@ routes and the old table are accepted as aliases. `tests/` still imports the old
   `leggi_chiusa`) and an `APPROVAL_EXPIRED` event so a late decision is `already_closed`; device description with limits,
   `online`, `last_seen` (`app/core/dispositivi.py`); health pieces (`app/core/salute.py`); missing `old_value`/`new_value` are
   stored as NULL.
+- **`DATABASE_URL`** is no longer read; if it is set and `LANGBRAIN_DB_URL` is not, the start logs a clear warning saying which
+  variables to use (no silent fallback: the database stays SQLite).
 - **CI on GitHub**: SQLite on Python 3.12 and 3.14, the whole suite on Postgres 16, Docker image build with startup, gitleaks
   and pip-audit; the `conformita` job is disabled (it lives in HQ's fork).
 

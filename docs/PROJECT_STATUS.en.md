@@ -33,7 +33,7 @@ physical state of the (simulated) devices is in memory, observability is missing
 | Settings page | `/config`: edits `.env` and `configurazione.toml` (and the files of installed nodes); the admin can restart the app. |
 | Dependencies | Exact versions in `requirements.txt`, complete list in `requirements.lock`; `pip-audit` finds no known vulnerabilities. |
 | Tests | `python -m pytest tests`: temporary databases, no real LLM, the real databases are never touched. Mutation checks on the critical points; real runs with Mistral/OpenRouter/Gemini done by hand during development. |
-| CI and security | `.github/workflows/ci.yml`, run on GitHub on 2026-10-16 (green on branch `feat/allineamento-contratto-1.0.4`): SQLite tests on Python 3.12 and 3.14, the whole suite on Postgres 16 (`tests/pg_isolamento.py`), Docker image build with startup and refusal to start without a key, gitleaks and pip-audit (`scripts/scansione_sicurezza.sh`). The `conformita` job (contract suite) is disabled: it lives in HQ's fork. Plus `SECURITY.md`, `CONTRIBUTING.md`. |
+| CI and security | `.github/workflows/ci.yml`, green on GitHub on `main` (commit `a9cccc2`, tag `poc-contratto-1.0.4-rc2`): SQLite tests on Python 3.12 and 3.14, the whole suite on Postgres 16 (`tests/pg_isolamento.py`), **Docker image build with startup** and refusal to start without a key, gitleaks and pip-audit (`scripts/scansione_sicurezza.sh`). The `conformita` job (contract suite) is disabled: it lives in HQ's fork. Plus `SECURITY.md`, `CONTRIBUTING.md`. |
 | Docker | `Dockerfile` and `docker-compose.yml` (SQLite volume or `LANGBRAIN_DB_BACKEND`/`LANGBRAIN_DB_URL` for Postgres, health check, `python -m app.serve` with `LANGBRAIN_WORKERS` workers, tesseract for local OCR redaction). The image was built and tried (2026-10-15) with 3 workers against Postgres: startup, agents, models, events, statistics, HITL, checkpoints, restart and reset work. |
 
 ## Known limits
@@ -54,7 +54,13 @@ physical state of the (simulated) devices is in memory, observability is missing
 - **Observability**: correlation id and actor per request (`X-Correlation-Id`, `X-Actor`, `app/core/contesto.py`) and optional JSON logs (`LANGBRAIN_LOG_FORMAT=json`, no secrets). No metrics or traces. No WebSocket (streaming uses
   Server-Sent Events).
 - **Languages**: configuration validation errors and logs are in Italian.
-- **Tests still missing**: load; HITL timer with a real deadline on Postgres. Under heavy machine load a timing-sensitive Postgres test can fail intermittently (seen locally on Docker Desktop, not in CI).
+- **Tests still missing**: load; HITL timer with a real deadline on Postgres.
+- **Intermittent timeouts of the Postgres suite, only locally on Docker Desktop (Windows)**: when the test container reaches Postgres through the
+  port published on the host (`host.docker.internal:55433`), a few tests (seen: `test_modelli_agenti`, `test_timer_hitl`,
+  `test_validazione_gerarchia`) hang for 60 s and fail with `TimeoutError` (asyncpg's default connect timeout), and the suite takes 130-290 s
+  instead of 80. It is not core code: with the container on the **same Docker network** as Postgres (service name, no port forwarding) the whole
+  suite passes (530 passed, 0 failed in 79 s, even with `--cpus 1`), and CI on GitHub never saw it. See the Italian status for the reproduction.
+- **Windows suite, 11 known `WinError 32` failures**: see `tests_windows/README.md` (cause and tests).
 - **Override**: turning the directive into commands is left to the LLM; every command still goes through the list of
   allowed devices and is traced in the audit log with `actor: "Brain_Override"`.
 
@@ -124,7 +130,7 @@ In the core, so that an adapter (HQ's code) can mount on top without forcing any
 - [x] Correlation id, actor and decision log with `outcome`, `command_id`, `approval_id`; millisecond timestamps.
 - [x] `tenta_comando` (`app/core/comandi.py`): a command from outside the graph with a structured outcome and a recorded decision.
 - [x] JSON logs, `LANGBRAIN_REQUIRE_API_KEY`, data retention (`app/core/conservazione.py`, off by default).
-- [x] CI on GitHub with SQLite (3.12 and 3.14), Postgres 16, Docker and security.
+- [x] CI on GitHub with SQLite (3.12 and 3.14), Postgres 16, Docker and security. On `origin`: tags `poc-contratto-1.0.4-base` (`3cb93f6`), `-rc1` (`4a679fb`), `-rc2` (`a9cccc2`) and branch `poc-sqlite` (`3cb93f6`, PoC fixes only).
 - [x] Approvals (`app/core/approvazioni.py`): stable `approval_id`, `description`/`reason` in Italian, a single pending one per thread, `approve`/`reject`, a second decision = `already_closed`, no OVERRIDE.
 - [x] Event bus (`app/core/bus_eventi.py`): persisted monotonic id that is never reused, `Last-Event-ID`, buffer of at least one hour, `: ping`, only the contract's seven types and only what is published. The `/stream` HTTP route is missing: it belongs to the adapter.
 - [ ] `agent_platform` provider in the MAO (OpenAI-compatible endpoint, the service account's Google credentials, `GCP_PROJECT`, `GCP_LOCATION`): waiting for HQ's parameters.
