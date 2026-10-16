@@ -6,7 +6,7 @@ Aggiornato il 2026-09-20. La versione precedente di questo documento era un audi
 
 ## Sintesi
 
-LangBrain è un boilerplate funzionante per sistemi di agenti gerarchici su LangGraph, con un dominio dimostrativo (smart home) e uno di prova (omeostasi medica). Il ciclo completo Brain → organi → componenti, le escalation, l'approvazione dell'operatore, l'API, la persistenza su SQLite, la sicurezza di base e la documentazione sono in ordine e coperti da test. **Non è pronto per la produzione**: gira con un solo worker, lo stato fisico dei dispositivi (simulati) è in memoria, manca l'observability. I limiti sono elencati sotto.
+LangBrain è un boilerplate funzionante per sistemi di agenti gerarchici su LangGraph, con un dominio dimostrativo (smart home) e uno di prova (omeostasi medica). Il ciclo completo Brain → organi → componenti, le escalation, l'approvazione dell'operatore, l'API, la persistenza su SQLite o Postgres, la sicurezza di base e la documentazione sono in ordine e coperti da test. **Non è pronto per la produzione**: gira con un solo worker, lo stato fisico dei dispositivi (simulati) è in memoria, manca l'observability. I limiti sono elencati sotto.
 
 ## Cosa c'è ed è verificato
 
@@ -19,7 +19,7 @@ LangBrain è un boilerplate funzionante per sistemi di agenti gerarchici su Lang
 | Errori del modello | Codici classificati (`CREDITI_ESAURITI`, `CHIAVE_NON_VALIDA`, `LIMITE_RICHIESTE`, `RISPOSTA_TRONCATA`, ...) con suggerimento; nessun ripiego silenzioso: il grafo si ferma e l'operatore risolve (cambia chiave, ricarica crediti) e riprende. `.env` e `configurazione.toml` si ricaricano a caldo. |
 | Modelli per agente | Provider e modello per singolo agente via API, ereditati dal padre (`app/core/modelli_agenti.py`). Provider: OpenRouter, Google AI Studio, Mistral, locale. |
 | HITL | Due flussi separati (wrapper sui nodi, approvazione del Brain sulle escalation) scelti con `[hitl] livello`; pause di emergenza sempre attive; timer con azione alla scadenza (`sistema`, `respingi`, `umano`); decisioni `APPROVA`, `RESPINGI`, `OVERRIDE` (quest'ultimo con arbitrato semantico dell'LLM). |
-| Persistenza | Checkpointer `AsyncSqliteSaver` sullo stesso file di `DB_PATH`: thread, interrupt pendenti e scadenze HITL sopravvivono a riavvii e ricompilazioni del grafo. |
+| Persistenza | Un solo punto d'accesso al database (`app/core/archivio.py`, SQLAlchemy Core): SQLite nel file `DB_PATH` (predefinito) oppure Postgres con `DATABASE_URL`. Checkpointer `AsyncSqliteSaver` sullo stesso file, o `AsyncPostgresSaver` su pool con Postgres: thread, interrupt pendenti e scadenze HITL sopravvivono a riavvii e ricompilazioni del grafo. |
 | Sicurezza API | Tre ruoli con chiavi separate (`tirocinante`, `medico_di_guardia`, `primario`), matrice dei permessi con rifiuto per impostazione predefinita, un test verifica che ogni rotta sia classificata. Vedi `SECURITY.md`. |
 | Lingue | Italiano e inglese: nomi della configurazione, ruoli e variabili d'ambiente accettati in entrambe le lingue; `[generale] lingua` sceglie i prompt predefiniti, i messaggi dell'API e i testi delle pagine; risposte del modello e decisioni dell'operatore sono lette in entrambe le lingue. |
 | Streaming | `POST /graph/run/stream` e `/graph/resume/stream` (Server-Sent Events, un evento per nodo) e la pagina `GET /demo` che mostra il grafo in azione. |
@@ -29,18 +29,18 @@ LangBrain è un boilerplate funzionante per sistemi di agenti gerarchici su Lang
 | Dipendenze | Versioni esatte in `requirements.txt`, elenco completo in `requirements.lock`; `pip-audit` non trova vulnerabilità note. |
 | Test | `python -m pytest tests`: database temporanei, nessun LLM reale, i database veri non vengono mai toccati. Prove per mutazione sui punti critici; prove reali con Mistral/OpenRouter/Gemini eseguite a mano durante lo sviluppo. |
 | CI e sicurezza | `.github/workflows/ci.yml` (test su Python 3.12 e 3.14, gitleaks, pip-audit), `scripts/scansione_sicurezza.sh`, `SECURITY.md`, `CONTRIBUTING.md`. La CI è scritta ma non ancora eseguita su GitHub: il primo push la proverà. |
-| Docker | `Dockerfile` e `docker-compose.yml` (volume SQLite, health check, `python -m app.serve` con `LANGBRAIN_WORKERS` worker). Non è stato possibile costruire l'immagine sulla macchina di sviluppo (Docker assente): va provata al primo uso. |
+| Docker | `Dockerfile` e `docker-compose.yml` (volume SQLite o `DATABASE_URL` per Postgres, health check, `python -m app.serve` con `LANGBRAIN_WORKERS` worker). L'immagine è stata costruita e provata (2026-10-15) con 3 worker contro Postgres: avvio, agenti, modelli, eventi, statistiche, HITL, checkpoint, riavvio e reset funzionano. |
 
 ## Limiti noti
 
-- **Più worker condividono lo stato su SQLite** (`python -m app.serve`, `app/core/multiprocesso.py`): compiti in background in un processo alla volta, configurazione HITL a runtime, valori degli effettori simulati, interruttori dei tool e grafo compilato condivisi. Non condivisi: i guasti simulati e l'unico thread `api_session` del grafo dimostrativo (le esecuzioni si mettono in fila). `python -m uvicorn` resta un processo solo.
+- **Più worker condividono lo stato nel database (SQLite o Postgres)** (`python -m app.serve`, `app/core/multiprocesso.py`): compiti in background in un processo alla volta, configurazione HITL a runtime, valori degli effettori simulati, interruttori dei tool e grafo compilato condivisi. Non condivisi: i guasti simulati e l'unico thread `api_session` del grafo dimostrativo (le esecuzioni si mettono in fila). `python -m uvicorn` resta un processo solo.
 - **Stato fisico dei tool in memoria**, non riconciliato con il DB al riavvio; i tool sono simulati (nessun adapter hardware, MQTT o webhook).
 - **Dati non usati o non limitati**: la tabella `readings` non viene popolata; `GraphState.reduce_readings` accumula senza finestra temporale.
 - **Registro eventi**: timestamp SQLite al secondo (eventi simultanei senza ordine garantito); gli errori DB in `mark_resolved`, `unblock_target` e TTL vengono rilanciati: `/events/unblock` e `/events/reset-conflicts` rispondono 503 senza toccare il dispositivo, il Brain completa il ciclo e avvisa l'operatore che l'escalation è rimasta aperta.
 - **Provider gratuiti**: i modelli gratuiti hanno limiti di richieste e crediti; quando finiscono il grafo si ferma per l'operatore (comportamento voluto), oppure si abilita il ripiego in `configurazione.toml`.
 - **Observability**: solo log standard, nessuna metrica, trace o correlation ID. Nessun WebSocket (lo streaming è a Server-Sent Events).
 - **Lingue**: gli errori di validazione della configurazione e i log sono in italiano.
-- **Test ancora assenti**: concorrenza SQLite tra più processi, build Docker, carico.
+- **Test ancora assenti**: carico; timer HITL con scadenza reale su Postgres. I test su Postgres partono solo con `TEST_DATABASE_URL` (`tests_windows/test_win_postgres.py`).
 - **Override**: la traduzione della direttiva in comandi è affidata all'LLM; ogni comando passa comunque dall'elenco dei dispositivi ammessi e viene tracciato nell'audit log con `actor: "Brain_Override"`.
 
 ## Dipendenze e configurazione
@@ -51,7 +51,7 @@ Le dipendenze sono fissate (2026-09-20):
 
 | File | Contenuto |
 |---|---|
-| `requirements.txt` | le 10 dipendenze dirette con versione esatta (`==`): `langgraph`, `langgraph-checkpoint-sqlite`, `langchain-core`, `fastapi`, `uvicorn[standard]`, `pydantic`, `aiosqlite`, `python-dotenv`, `httpx`, `openai` |
+| `requirements.txt` | le dipendenze dirette con versione esatta (`==`): `langgraph`, `langgraph-checkpoint-sqlite`, `langgraph-checkpoint-postgres`, `langchain-core`, `fastapi`, `uvicorn[standard]`, `pydantic`, `aiosqlite`, `sqlalchemy[asyncio]`, `alembic`, `asyncpg`, `psycopg[binary,pool]`, `python-dotenv`, `httpx`, `openai` |
 | `requirements.lock` | elenco completo di 52 pacchetti (transitive incluse), generato da un ambiente pulito; lo usa il Dockerfile (`pip install --no-deps` seguito da `pip check`) |
 | `requirements-dev.txt` | `requirements.txt` più `pytest` |
 
@@ -75,17 +75,18 @@ Le dipendenze sono fissate (2026-09-20):
 
 ### Coerenza Docker Compose
 
-`Dockerfile` e `docker-compose.yml` sono operativi: espongono la porta configurabile, usano un volume SQLite, health check, numero di worker configurabile e pass-through esplicito delle variabili. `LOCAL_MODEL_DOCKER_BASE_URL` separa l'endpoint visto dal container da quello nativo; per un modello su un'altra macchina LAN i due URL possono coincidere.
+`Dockerfile` e `docker-compose.yml` sono operativi: espongono la porta configurabile, usano un volume SQLite (o `DATABASE_URL` per Postgres), health check, numero di worker configurabile e pass-through esplicito delle variabili. `LOCAL_MODEL_DOCKER_BASE_URL` separa l'endpoint visto dal container da quello nativo; per un modello su un'altra macchina LAN i due URL possono coincidere.
 
 ## Roadmap
 
 - [ ] WebSocket (oltre allo streaming SSE già presente).
-- [ ] Backend Postgres e migrazioni versionate.
+- [x] Backend Postgres (`DATABASE_URL`, SQLAlchemy Core, provato in Docker con più worker).
+- [ ] Migrazioni versionate (Alembic è nelle dipendenze ma non ancora usato: oggi le colonne mancanti si aggiungono in automatico).
 - [ ] MQTT/webhook reali al posto del produttore di eventi simulato.
 - [ ] Budget, timeout e circuit breaker per modello.
 - [ ] Tracing distribuito, metriche e correlation ID.
 - [ ] Persistenza dello stato fisico dei tool e adapter hardware.
 - [ ] Scheduler robusto per health check e TTL.
-- [x] Funzionamento multi-worker (stato condiviso su SQLite; un backend di dispositivi reali sostituirebbe gli effettori simulati).
+- [x] Funzionamento multi-worker (stato condiviso nel database, SQLite o Postgres; un backend di dispositivi reali sostituirebbe gli effettori simulati).
 - [ ] Dashboard operatore completa (la pagina `/demo` è solo dimostrativa).
 - [ ] Test di concorrenza e di carico.

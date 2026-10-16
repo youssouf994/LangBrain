@@ -10,7 +10,7 @@ known limits and the roadmap.
 
 LangBrain is a working boilerplate for hierarchical agent systems on LangGraph, with a demonstration domain (smart
 home), a test domain (medical homeostasis) and nodes that plug into the API as extensions (`app/nodes`). The full cycle Brain →
-organs → components, escalations, operator approval, the API, persistence on SQLite, basic security and the
+organs → components, escalations, operator approval, the API, persistence on SQLite or Postgres, basic security and the
 documentation are in order and covered by tests. **It is not production-ready**: it runs with a single worker by default (several with `python -m app.serve`), the
 physical state of the (simulated) devices is in memory, observability is missing. The limits are listed below.
 
@@ -25,7 +25,7 @@ physical state of the (simulated) devices is in memory, observability is missing
 | Model errors | Classified codes (`CREDITI_ESAURITI`, `CHIAVE_NON_VALIDA`, `LIMITE_RICHIESTE`, `RISPOSTA_TRONCATA`, ...) with a hint; no silent fallback: the graph stops and the operator solves the problem (changes key, tops up credits) and resumes. `.env` and the configuration file are reloaded live. |
 | Models per agent | Provider and model per agent through the API, inherited from the parent (`app/core/modelli_agenti.py`). Providers: OpenRouter, Google AI Studio, Mistral, local. |
 | HITL | Two separate flows (wrapper on nodes, Brain approval on escalations) chosen with `[hitl] level`; emergency pauses always active; timer with action on expiry (`system`, `reject`, `human`); decisions `APPROVE`, `REJECT`, `OVERRIDE` (the latter with semantic arbitration by the LLM). |
-| Persistence | `AsyncSqliteSaver` checkpointer on the same file as `DB_PATH`: threads, pending interrupts and HITL deadlines survive restarts and recompilations of the graph. |
+| Persistence | A single entry point to the database (`app/core/archivio.py`, SQLAlchemy Core): SQLite in the `DB_PATH` file (default) or Postgres with `DATABASE_URL`. `AsyncSqliteSaver` checkpointer on the same file, or `AsyncPostgresSaver` on a pool with Postgres: threads, pending interrupts and HITL deadlines survive restarts and recompilations of the graph. |
 | API security | Three roles with separate keys (viewer, operator, admin; Italian names `tirocinante`, `medico_di_guardia`, `primario`), permission matrix that denies by default, a test checks that every route is classified. See `SECURITY.md`. |
 | Languages | Italian and English: configuration names, roles and environment variables are accepted in both languages; `[general] language` chooses the default prompts, API messages and page texts; the answers of the model and the operator decisions are read in both languages. |
 | Streaming | `POST /graph/run/stream` and `/graph/resume/stream` (Server-Sent Events, one event per node) and the `GET /demo` page that shows the graph at work. |
@@ -34,11 +34,11 @@ physical state of the (simulated) devices is in memory, observability is missing
 | Dependencies | Exact versions in `requirements.txt`, complete list in `requirements.lock`; `pip-audit` finds no known vulnerabilities. |
 | Tests | `python -m pytest tests`: temporary databases, no real LLM, the real databases are never touched. Mutation checks on the critical points; real runs with Mistral/OpenRouter/Gemini done by hand during development. |
 | CI and security | `.github/workflows/ci.yml` (tests on Python 3.12 and 3.14, gitleaks, pip-audit), `scripts/scansione_sicurezza.sh`, `SECURITY.md`, `CONTRIBUTING.md`. The CI is written but not yet run on GitHub: the first push will try it. |
-| Docker | `Dockerfile` and `docker-compose.yml` (SQLite volume, health check, `python -m app.serve` with `LANGBRAIN_WORKERS` workers, tesseract for local OCR redaction). The image could not be built on the development machine (no Docker): try it at first use. |
+| Docker | `Dockerfile` and `docker-compose.yml` (SQLite volume or `DATABASE_URL` for Postgres, health check, `python -m app.serve` with `LANGBRAIN_WORKERS` workers, tesseract for local OCR redaction). The image was built and tried (2026-10-15) with 3 workers against Postgres: startup, agents, models, events, statistics, HITL, checkpoints, restart and reset work. |
 
 ## Known limits
 
-- **Several workers share state through SQLite** (`python -m app.serve`, `app/core/multiprocesso.py`): background tasks
+- **Several workers share state through the database (SQLite or Postgres)** (`python -m app.serve`, `app/core/multiprocesso.py`): background tasks
   in one process at a time, runtime HITL configuration, simulated effector values, tool switches and the compiled graph
   shared. Not shared: simulated faults, and the single `api_session` thread of the demo graph (runs take turns).
   Plain `python -m uvicorn` is still one process.
@@ -54,7 +54,7 @@ physical state of the (simulated) devices is in memory, observability is missing
 - **Observability**: standard logs only, no metrics, traces or correlation IDs. No WebSocket (streaming uses
   Server-Sent Events).
 - **Languages**: configuration validation errors and logs are in Italian.
-- **Tests still missing**: SQLite concurrency across processes, Docker build, load.
+- **Tests still missing**: load; HITL timer with a real deadline on Postgres. Postgres tests run only with `TEST_DATABASE_URL` (`tests_windows/test_win_postgres.py`).
 - **Override**: turning the directive into commands is left to the LLM; every command still goes through the list of
   allowed devices and is traced in the audit log with `actor: "Brain_Override"`.
 
@@ -66,7 +66,7 @@ The dependencies are pinned:
 
 | File | Content |
 |---|---|
-| `requirements.txt` | the 14 direct dependencies with exact version (`==`): `langgraph`, `langgraph-checkpoint-sqlite`, `langchain-core`, `fastapi`, `uvicorn[standard]`, `pydantic`, `aiosqlite`, `python-dotenv`, `httpx`, `openai`, `pypdf`, `asn1crypto`, `pillow`, `cryptography` |
+| `requirements.txt` | the direct dependencies with exact version (`==`): `langgraph`, `langgraph-checkpoint-sqlite`, `langgraph-checkpoint-postgres`, `langchain-core`, `fastapi`, `uvicorn[standard]`, `pydantic`, `aiosqlite`, `sqlalchemy[asyncio]`, `alembic`, `asyncpg`, `psycopg[binary,pool]`, `python-dotenv`, `httpx`, `openai`, `pypdf`, `asn1crypto`, `pillow`, `cryptography` |
 | `requirements.lock` | complete list of the packages (transitive included), generated from a clean environment; used by the Dockerfile (`pip install --no-deps` followed by `pip check`) |
 | `requirements-dev.txt` | `requirements.txt` plus `pytest` |
 
@@ -99,18 +99,19 @@ intervals are partly hardcoded or left to the domain implementation.
 
 ### Docker Compose consistency
 
-`Dockerfile` and `docker-compose.yml` work: they expose the configurable port, use a SQLite volume, health check,
+`Dockerfile` and `docker-compose.yml` work: they expose the configurable port, use a SQLite volume (or `DATABASE_URL` for Postgres), health check,
 a configurable number of workers and explicit pass-through of the variables. `LOCAL_MODEL_DOCKER_BASE_URL` separates the endpoint seen
 by the container from the native one; for a model on another LAN machine the two URLs can be the same.
 
 ## Roadmap
 
 - [ ] WebSocket (besides the SSE streaming already present).
-- [ ] Postgres backend and versioned migrations.
+- [x] Postgres backend (`DATABASE_URL`, SQLAlchemy Core, tried in Docker with several workers).
+- [ ] Versioned migrations (Alembic is a dependency but not used yet: missing columns are added automatically today).
 - [ ] Real MQTT/webhooks instead of the simulated event producer.
 - [ ] Budget, timeout and circuit breaker per model.
 - [ ] Distributed tracing, metrics and correlation IDs.
 - [ ] Persistence of the physical state of the tools and hardware adapters.
 - [ ] Robust scheduler for health checks and TTL.
-- [x] Multi-worker operation (shared state on SQLite; a real device backend would replace the simulated effectors).
+- [x] Multi-worker operation (shared state in the database, SQLite or Postgres; a real device backend would replace the simulated effectors).
 - [ ] Test of concurrency and load.

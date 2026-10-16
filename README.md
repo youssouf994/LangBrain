@@ -26,7 +26,7 @@ python examples/avvia_demo.py                      # scenario di prova + pagina 
 
 La demo crea un database dedicato (`demo.db`, i tuoi dati non vengono toccati), avvia il server e apre `http://127.0.0.1:8765/demo`. Premi **Esegui un ciclo**: i nodi della gerarchia si illuminano uno dopo l'altro mentre gli agenti (modelli reali) ragionano, gli eventi e i dispositivi si aggiornano e, quando il Brain chiede l'approvazione per la porta, decidi tu con **Approva** o **Respingi**.
 
-Per il server vero: `python -m uvicorn app.api.main:app` (un processo) oppure `python -m app.serve` (più processi: l'app è usabile da più persone contemporaneamente) oppure `docker compose up`. Le scelte dell'utente (dispositivi e valori ammessi, provider e modelli, HITL, timer) stanno in [`configurazione.toml`](configurazione.toml), i segreti nel `.env`. La guida completa è in [`docs/HOW_TO_CUSTOMIZE.md`](docs/HOW_TO_CUSTOMIZE.md); sicurezza e contributi in [`SECURITY.md`](SECURITY.md) e [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Per il server vero: `python -m uvicorn app.api.main:app` (un processo) oppure `python -m app.serve` (più processi: l'app è usabile da più persone contemporaneamente) oppure `docker compose up`. Il database è SQLite (file `DB_PATH`) di default; con `DATABASE_URL=postgresql://...` (anche in `docker compose`) è Postgres. Le scelte dell'utente (dispositivi e valori ammessi, provider e modelli, HITL, timer) stanno in [`configurazione.toml`](configurazione.toml), i segreti nel `.env`. La guida completa è in [`docs/HOW_TO_CUSTOMIZE.md`](docs/HOW_TO_CUSTOMIZE.md); sicurezza e contributi in [`SECURITY.md`](SECURITY.md) e [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ---
 
