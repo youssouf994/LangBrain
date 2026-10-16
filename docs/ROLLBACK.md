@@ -44,8 +44,8 @@ git checkout poc-contratto-1.0.4-base        # tag, commit 3cb93f6
 docker compose build && docker compose up -d
 ```
 
-`poc-sqlite` e il tag `poc-contratto-1.0.4-base` sono il rollback: non vanno modificati né spostati. (Al 16 ottobre 2026 non
-risultano ancora creati in `origin`: vanno creati dal commit `3cb93f6` prima di contarci.)
+`poc-sqlite` e il tag `poc-contratto-1.0.4-base` puntano al commit `3cb93f6` (creati il 16 ottobre 2026, quando `main` ha
+raccolto tutto il lavoro successivo): sono il rollback, non vanno spostati. Le correzioni al PoC vanno solo su `poc-sqlite`.
 
 ## 4. Verifica dopo il rollback
 
