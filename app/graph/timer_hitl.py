@@ -31,7 +31,7 @@ from typing import Any, Callable
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.core import archivio, multiprocesso
+from app.core import archivio, contesto, multiprocesso
 from langgraph.types import Command
 
 from app.core.configurazione import SCADENZA_SISTEMA, SCADENZA_UMANO, get_configurazione
@@ -216,40 +216,41 @@ class GestoreTimerHitl:
 
         respinti: list[str] = []
         for thread_id, interrupt_id, durata in scadute:
-            async with self.blocco(thread_id):
-                corrente, _ = await self._interrupt_corrente(thread_id)
-                if corrente != interrupt_id:
-                    await self.sincronizza(thread_id)  # già gestita dall'operatore
-                    continue
-                azione = self._azione()
-                if azione == SCADENZA_UMANO:
-                    await self._imposta_stato(thread_id, STATO_SCADUTA_IN_ATTESA)
-                    logger.warning("[TimerHITL] Timer scaduto sul thread '%s': il grafo resta in attesa dell'operatore.", thread_id)
-                    continue
-                if azione == SCADENZA_SISTEMA:
-                    decisione = {
-                        "decision": DECISIONE_SISTEMA,
-                        "reasoning": f"Timer HITL scaduto: nessuna risposta dell'operatore entro {durata}s, decide il sistema.",
-                    }
-                else:
-                    decisione = {
-                        "decision": "RESPINGI",
-                        "reasoning": f"Timer HITL scaduto: nessuna risposta dell'operatore entro {durata}s, respinto automaticamente.",
-                    }
-                try:
-                    logger.warning(
-                        "[TimerHITL] Timer di %ss scaduto sul thread '%s': azione '%s'.", durata, thread_id, azione,
-                    )
-                    await self._ottieni_grafo().ainvoke(
-                        Command(resume=decisione), config={"configurable": {"thread_id": thread_id}},
-                    )
-                except Exception:
-                    logger.exception("[TimerHITL] Errore nel respingere la richiesta scaduta del thread '%s'.", thread_id)
-                    await self._imposta_stato(thread_id, STATO_ERRORE)
-                    continue
-                respinti.append(thread_id)
-                await self._elimina(thread_id)
-                await self.sincronizza(thread_id)  # se il grafo si è fermato di nuovo parte un nuovo timer
+            with contesto.fatto_interno():  # la scadenza è un fatto interno: ha il suo correlation id
+                async with self.blocco(thread_id):
+                    corrente, _ = await self._interrupt_corrente(thread_id)
+                    if corrente != interrupt_id:
+                        await self.sincronizza(thread_id)  # già gestita dall'operatore
+                        continue
+                    azione = self._azione()
+                    if azione == SCADENZA_UMANO:
+                        await self._imposta_stato(thread_id, STATO_SCADUTA_IN_ATTESA)
+                        logger.warning("[TimerHITL] Timer scaduto sul thread '%s': il grafo resta in attesa dell'operatore.", thread_id)
+                        continue
+                    if azione == SCADENZA_SISTEMA:
+                        decisione = {
+                            "decision": DECISIONE_SISTEMA,
+                            "reasoning": f"Timer HITL scaduto: nessuna risposta dell'operatore entro {durata}s, decide il sistema.",
+                        }
+                    else:
+                        decisione = {
+                            "decision": "RESPINGI",
+                            "reasoning": f"Timer HITL scaduto: nessuna risposta dell'operatore entro {durata}s, respinto automaticamente.",
+                        }
+                    try:
+                        logger.warning(
+                            "[TimerHITL] Timer di %ss scaduto sul thread '%s': azione '%s'.", durata, thread_id, azione,
+                        )
+                        await self._ottieni_grafo().ainvoke(
+                            Command(resume=decisione), config={"configurable": {"thread_id": thread_id}},
+                        )
+                    except Exception:
+                        logger.exception("[TimerHITL] Errore nel respingere la richiesta scaduta del thread '%s'.", thread_id)
+                        await self._imposta_stato(thread_id, STATO_ERRORE)
+                        continue
+                    respinti.append(thread_id)
+                    await self._elimina(thread_id)
+                    await self.sincronizza(thread_id)  # se il grafo si è fermato di nuovo parte un nuovo timer
         return respinti
 
     async def _imposta_stato(self, thread_id: str, stato: str) -> None:

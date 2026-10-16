@@ -277,7 +277,23 @@ def aggiungi_colonne_mancanti(connessione_sincrona, metadata) -> list[str]:
             connessione_sincrona.exec_driver_sql(f"ALTER TABLE {nome_tabella} ADD COLUMN {definizione}")
             aggiunte.append(f"{tabella.name}.{colonna.name}")
             logger.info("Migrazione DB: aggiunta colonna '%s' a '%s'.", colonna.name, tabella.name)
+    aggiunte.extend(_crea_indici_mancanti(connessione_sincrona, metadata, ispettore))
     return aggiunte
+
+
+def _crea_indici_mancanti(connessione_sincrona, metadata, ispettore) -> list[str]:
+    """Gli indici dello schema che una tabella già esistente non ha ancora (un database creato da una versione precedente)."""
+    creati: list[str] = []
+    for tabella in metadata.sorted_tables:
+        if not ispettore.has_table(tabella.name):
+            continue
+        presenti = {i["name"] for i in ispettore.get_indexes(tabella.name)}
+        for indice in tabella.indexes:
+            if indice.name not in presenti:
+                indice.create(connessione_sincrona, checkfirst=True)
+                creati.append(f"indice {indice.name}")
+                logger.info("Migrazione DB: creato l'indice '%s' su '%s'.", indice.name, tabella.name)
+    return creati
 
 
 async def chiudi_motori() -> None:

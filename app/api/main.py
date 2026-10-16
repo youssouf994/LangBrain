@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from app.api.settings_routes import register_routes as register_settings_routes
 from app.agents.agent_registry import AgenteConFigliError, AgentRegistry, ErroreGerarchia
 from app.core.avvio import verifica_avvio
+from app.core.contesto import MiddlewareContesto
 from app.checkpointer import apri_checkpointer, chiudi_checkpointer, get_checkpointer, svuota_checkpoint
 from app.core import multiprocesso
 from app.core.configurazione import get_configurazione
@@ -186,6 +187,7 @@ app = FastAPI(
     dependencies=[Depends(autentica_e_autorizza), Depends(sincronizza_stato)],
 )
 
+app.add_middleware(MiddlewareContesto)  # correlation id e attore (X-Correlation-Id, X-Actor) per ogni richiesta
 register_settings_routes(app)
 for _estensione in carica_estensioni():  # rotte e pagine dei nodi installati (app/nodes)
     if _estensione.registra_rotte:

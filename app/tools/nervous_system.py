@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, insert, literal, select, update
 
-from app.core import archivio
+from app.core import archivio, contesto
 from app.db import schema
 from app.db.database import DB_PATH
 
@@ -23,6 +23,7 @@ def _riga(riga) -> dict:
     """Una riga come dizionario, con il timestamp nel formato storico `YYYY-MM-DD HH:MM:SS`."""
     dati = dict(riga._mapping)
     if "timestamp" in dati:
+        dati["ts"] = schema.iso_ms(dati["timestamp"])  # ISO 8601 UTC al millisecondo
         dati["timestamp"] = schema.come_testo(dati["timestamp"])
     return dati
 
@@ -30,6 +31,17 @@ def _riga(riga) -> dict:
 def _escalation_non_chiusa():
     """Condizione: l'azione non è già stata risolta né riconciliata (il `\\_` è un carattere `_` letterale)."""
     return events.c.action.not_like("RESOLVED\\_%", escape="\\") & events.c.action.not_like("RECONCILED\\_%", escape="\\")
+
+
+def esito_da_azione(azione: str) -> str:
+    """L'`outcome` più probabile di un evento in base al nome dell'azione, quando chi scrive non lo indica."""
+    if azione.startswith("REJECTED"):
+        return "rejected"
+    if azione.startswith(("TOOL_ERROR", "TOOL_FAILURE", "FAILED")):
+        return "failed"
+    if azione.startswith(("RESOLVED_", "RECONCILED_", "EXPIRED_", "UNBLOCKED", "ESCALATION")):
+        return "informational"
+    return "applied"
 
 
 class NervousSystem:
@@ -53,7 +65,7 @@ class NervousSystem:
             if "all" not in self.target:
                 interrogazione = interrogazione.where(events.c.target.in_(self.target))
             async with self._motore().connect() as db:
-                righe = (await db.execute(interrogazione.order_by(events.c.timestamp.desc()))).all()
+                righe = (await db.execute(interrogazione.order_by(events.c.timestamp.desc(), events.c.event_id.desc()))).all()
             return [_riga(r) for r in righe]
 
         except Exception as e:
@@ -62,21 +74,38 @@ class NervousSystem:
 
     async def log_event(
         self,
-        actor: str,
+        actor: str | None,
         action: str,
         target: str,
         old_value: str,
         new_value: str,
         reasoning: str,
-        escalated: bool = False
-    ) -> None:
-        """Registra un nuovo evento con old_value e new_value nel DB."""
+        escalated: bool = False,
+        *,
+        correlation_id: str | None = None,
+        outcome: str | None = None,
+        command_id: str | None = None,
+        approval_id: str | None = None,
+    ) -> int:
+        """
+        Registra una decisione/evento con old_value e new_value nel DB e restituisce il suo `event_id` (il `decision_id`).
+        `actor` mancante: l'attore della richiesta (`X-Actor`) oppure `system`. `correlation_id` mancante: quello della
+        richiesta, oppure uno nuovo (un fatto interno). `outcome` mancante: dedotto dall'azione (`esito_da_azione`).
+        """
+        esito = outcome or esito_da_azione(action)
+        if esito not in schema.ESITI_DECISIONE:
+            raise ValueError(f"Esito '{esito}' non valido: usa uno tra {list(schema.ESITI_DECISIONE)}.")
+        attore = actor or contesto.attore_corrente() or contesto.ATTORE_SISTEMA
+        correlazione = correlation_id or contesto.correlation_id_corrente() or contesto.nuovo_correlation_id()
         try:
             async with self._motore().begin() as db:
-                await db.execute(insert(events).values(
-                    actor=actor, action=action, target=target, old_value=str(old_value), new_value=str(new_value),
-                    reasoning=reasoning, escalated=int(bool(escalated))))
-            logger.info(f"[NervousSystem] DB Audit -> {actor} su {target}: {old_value} -> {new_value} ({action})")
+                risultato = await db.execute(insert(events).values(
+                    actor=attore, action=action, target=target, old_value=str(old_value), new_value=str(new_value),
+                    reasoning=reasoning, escalated=int(bool(escalated)), correlation_id=correlazione, outcome=esito,
+                    command_id=command_id, approval_id=approval_id))
+                evento_id = risultato.inserted_primary_key[0]
+            logger.info(f"[NervousSystem] DB Audit -> {attore} su {target}: {old_value} -> {new_value} ({action})")
+            return evento_id
         except Exception as e:
             logger.error(f"Errore durante la registrazione dell'evento su {target}: {e}")
             raise
@@ -181,7 +210,8 @@ class NervousSystem:
             async with self._motore().begin() as db:
                 await db.execute(insert(events).values(
                     actor=actor, action="UNBLOCKED", target=target, old_value="REJECTED", new_value="OFF",
-                    reasoning=reasoning, escalated=0))
+                    reasoning=reasoning, escalated=0, outcome="informational",
+                    correlation_id=contesto.correlation_id_corrente() or contesto.nuovo_correlation_id()))
                 # Invalida anche vecchi eventi di blocco pendenti
                 await db.execute(
                     update(events)

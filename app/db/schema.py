@@ -13,8 +13,23 @@ metadata = MetaData()
 
 
 def adesso_utc() -> datetime:
-    """Ora UTC senza fuso (le colonne sono `timestamp without time zone`, come il CURRENT_TIMESTAMP di SQLite)."""
-    return datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+    """Ora UTC senza fuso, al millisecondo (le colonne sono `timestamp without time zone`). La genera l'applicazione."""
+    adesso = datetime.now(timezone.utc)
+    return adesso.replace(tzinfo=None, microsecond=adesso.microsecond // 1000 * 1000)
+
+
+def iso_ms(valore):
+    """Un timestamp in ISO 8601 UTC con millisecondi (`2026-10-14T13:02:11.420Z`); i testi dell'altro formato si convertono."""
+    if isinstance(valore, str):
+        try:
+            valore = datetime.fromisoformat(valore)
+        except ValueError:
+            return valore
+    if isinstance(valore, datetime):
+        if valore.tzinfo is not None:
+            valore = valore.astimezone(timezone.utc).replace(tzinfo=None)
+        return valore.strftime("%Y-%m-%dT%H:%M:%S.") + f"{valore.microsecond // 1000:03d}Z"
+    return valore
 
 
 def come_testo(valore) -> str | None:
@@ -23,6 +38,9 @@ def come_testo(valore) -> str | None:
         return valore.strftime("%Y-%m-%d %H:%M:%S")
     return valore
 
+
+# Esiti ammessi di una decisione (colonna `events.outcome`).
+ESITI_DECISIONE = ("applied", "rejected", "pending_approval", "failed", "informational")
 
 events = Table(
     "events", metadata,
@@ -35,7 +53,13 @@ events = Table(
     Column("reasoning", Text),
     Column("timestamp", DateTime, default=adesso_utc, server_default=func.current_timestamp()),
     Column("escalated", Integer, default=0, server_default=text("0")),
+    # Campi del registro delle decisioni (contratto 1.0.4): facoltativi, le righe vecchie li hanno vuoti.
+    Column("correlation_id", Text),
+    Column("outcome", Text),
+    Column("command_id", Text),
+    Column("approval_id", Text),
     Index("idx_events_target_ts", "target", text("timestamp DESC")),
+    Index("idx_events_correlation", "correlation_id"),
     sqlite_autoincrement=True,
 )
 
