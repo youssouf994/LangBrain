@@ -21,6 +21,12 @@ LANGBRAIN_DB_BACKEND=sqlite        # oppure togliere la riga
 Con Docker Compose basta rilanciare con la variabile cambiata: `LANGBRAIN_DB_BACKEND=sqlite docker compose up -d`. Il volume
 `/data` con il file SQLite non viene mai toccato quando si usa Postgres, quindi resta com'era.
 
+### Chi usava `DATABASE_URL`
+
+Il nucleo **non legge più `DATABASE_URL`** (la leggevano solo le versioni di sviluppo del ramo Postgres, mai un tag). Si usano
+`LANGBRAIN_DB_BACKEND=postgres` e `LANGBRAIN_DB_URL` con lo stesso URL. Se `DATABASE_URL` è impostata e `LANGBRAIN_DB_URL` no,
+all'avvio compare un avviso nel log che dice quale variabile usare; il database resta SQLite, senza fallback silenziosi.
+
 ## 2. Cosa succede ai dati
 
 - **I due database sono indipendenti.** Nulla viene copiato da Postgres a SQLite (né il contrario) in automatico: tornando a
@@ -44,7 +50,7 @@ git checkout poc-contratto-1.0.4-base        # tag, commit 3cb93f6
 docker compose build && docker compose up -d
 ```
 
-`poc-sqlite` e il tag `poc-contratto-1.0.4-base` puntano al commit `3cb93f6` (creati il 16 ottobre 2026, quando `main` ha
+`poc-sqlite` e il tag `poc-contratto-1.0.4-base` esistono su `origin` e puntano al commit `3cb93f6` (creati il 16 ottobre 2026, quando `main` ha
 raccolto tutto il lavoro successivo): sono il rollback, non vanno spostati. Le correzioni al PoC vanno solo su `poc-sqlite`.
 
 ## 4. Verifica dopo il rollback

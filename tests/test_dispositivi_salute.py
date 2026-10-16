@@ -73,9 +73,10 @@ class SaluteTest(unittest.IsolatedAsyncioTestCase):
         stato = await salute.stato_database(os.path.join(tempfile.gettempdir(), "nessuna", "cartella", "x.db"))
         self.assertEqual(stato, {"status": "error"})
 
-    async def test_la_versione_dell_api_e_quella_del_nucleo(self):
-        from app.api.main import app
-        self.assertEqual(app.version, salute.VERSIONE_NUCLEO)
+    async def test_la_versione_del_nucleo_e_quella_dichiarata(self):
+        # `app.version` non si confronta: un nodo installato (app/nodes) può legittimamente dichiarare la versione del proprio prodotto.
+        self.assertEqual(salute.implementazione(), {"name": "langbrain", "version": salute.VERSIONE_NUCLEO})
+        self.assertRegex(salute.VERSIONE_NUCLEO, r"^\d+\.\d+\.\d+$")
 
 
 if __name__ == "__main__":

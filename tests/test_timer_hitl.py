@@ -222,7 +222,9 @@ class TimerAttivoTest(BaseTimerTest):
             compito = asyncio.create_task(self.gestore.sorveglia())
             for _ in range(100):
                 await asyncio.sleep(0.02)
-                if not await self.in_pausa():
+                # Il ciclo ha finito quando il grafo è ripreso E la scadenza è stata registrata e tolta (ultimo passo): cancellarlo
+                # prima lascerebbe una scrittura a metà e, su Windows, il file SQLite aperto alla pulizia della cartella.
+                if not await self.in_pausa() and not await self.gestore.elenco():
                     break
             compito.cancel()
             with self.assertRaises(asyncio.CancelledError):

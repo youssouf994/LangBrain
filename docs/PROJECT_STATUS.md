@@ -28,7 +28,7 @@ LangBrain è un boilerplate funzionante per sistemi di agenti gerarchici su Lang
 | Estensioni | `app/nodes/`: un nodo si aggancia all'API (rotte, pagine, impostazioni, prompt) senza che il core lo conosca. |
 | Dipendenze | Versioni esatte in `requirements.txt`, elenco completo in `requirements.lock`; `pip-audit` non trova vulnerabilità note. |
 | Test | `python -m pytest tests`: database temporanei, nessun LLM reale, i database veri non vengono mai toccati. Prove per mutazione sui punti critici; prove reali con Mistral/OpenRouter/Gemini eseguite a mano durante lo sviluppo. |
-| CI e sicurezza | `.github/workflows/ci.yml`, eseguita su GitHub il 2026-10-16 (run verde sul ramo `feat/allineamento-contratto-1.0.4`): test SQLite su Python 3.12 e 3.14, test dell'intera suite su Postgres 16 (`tests/pg_isolamento.py`), build dell'immagine Docker con avvio e rifiuto dell'avvio senza chiave, gitleaks e pip-audit (`scripts/scansione_sicurezza.sh`). Il job `conformita` (suite del contratto) è disabilitato: vive nel fork di HQ. Più `SECURITY.md`, `CONTRIBUTING.md`. |
+| CI e sicurezza | `.github/workflows/ci.yml`, verde su GitHub su `main` (commit `a9cccc2`, tag `poc-contratto-1.0.4-rc2`): test SQLite su Python 3.12 e 3.14, intera suite su Postgres 16 (`tests/pg_isolamento.py`), **build dell'immagine Docker con avvio** e rifiuto dell'avvio senza chiave, gitleaks e pip-audit (`scripts/scansione_sicurezza.sh`). Il job `conformita` (suite del contratto) è disabilitato: vive nel fork di HQ. Più `SECURITY.md`, `CONTRIBUTING.md`. |
 | Docker | `Dockerfile` e `docker-compose.yml` (volume SQLite o `LANGBRAIN_DB_BACKEND`/`LANGBRAIN_DB_URL` per Postgres, health check, `python -m app.serve` con `LANGBRAIN_WORKERS` worker). L'immagine è stata costruita e provata (2026-10-15) con 3 worker contro Postgres: avvio, agenti, modelli, eventi, statistiche, HITL, checkpoint, riavvio e reset funzionano. |
 
 ## Limiti noti
@@ -40,7 +40,15 @@ LangBrain è un boilerplate funzionante per sistemi di agenti gerarchici su Lang
 - **Provider gratuiti**: i modelli gratuiti hanno limiti di richieste e crediti; quando finiscono il grafo si ferma per l'operatore (comportamento voluto), oppure si abilita il ripiego in `configurazione.toml`.
 - **Observability**: correlation id e attore per richiesta (`X-Correlation-Id`, `X-Actor`, `app/core/contesto.py`) e log JSON opzionale (`LANGBRAIN_LOG_FORMAT=json`, senza segreti). Nessuna metrica o trace. Nessun WebSocket (lo streaming è a Server-Sent Events).
 - **Lingue**: gli errori di validazione della configurazione e i log sono in italiano.
-- **Test ancora assenti**: carico; timer HITL con scadenza reale su Postgres. Sui test su Postgres con molto carico della macchina qualche test sensibile ai tempi può fallire a intermittenza (visto in locale su Docker Desktop, non nella CI).
+- **Test ancora assenti**: carico; timer HITL con scadenza reale su Postgres.
+- **Timeout a intermittenza della suite su Postgres, solo in locale con Docker Desktop (Windows)**: se il container dei test raggiunge Postgres
+  passando dalla porta pubblicata sull'host (`host.docker.internal:55433`), qualche test (visti: `test_modelli_agenti`, `test_timer_hitl`,
+  `test_validazione_gerarchia`) resta fermo 60 s e fallisce con `TimeoutError`: è il timeout di connessione predefinito di asyncpg, e la
+  suite dura 130-290 s invece di 80. Non è codice del nucleo: con il container sulla **stessa rete Docker** di Postgres (nome del
+  servizio, nessun port-forward) la suite passa intera (530 passati, 0 falliti in 79 s, anche con `--cpus 1`), e la CI su GitHub non l'ha
+  mai visto. Per riprodurlo: `docker run --add-host host.docker.internal:host-gateway -e TEST_PG_URL=postgresql://postgres:prova@host.docker.internal:55433/langbrain_test <immagine> python -m pytest tests`
+  con Docker Desktop già carico; per evitarlo: `docker network create n`, Postgres e test sulla stessa rete e URL con il nome del container.
+- **Suite Windows, 11 fallimenti `WinError 32` noti**: vedi `tests_windows/README.md` (causa e test).
 - **Override**: la traduzione della direttiva in comandi è affidata all'LLM; ogni comando passa comunque dall'elenco dei dispositivi ammessi e viene tracciato nell'audit log con `actor: "Brain_Override"`.
 
 ## Dipendenze e configurazione
@@ -99,7 +107,7 @@ Nel nucleo, pronto perché un adattatore (codice di HQ) si monti sopra senza for
 - [x] Correlation id, attore e registro delle decisioni con `outcome`, `command_id`, `approval_id`; timestamp al millisecondo.
 - [x] `tenta_comando` (`app/core/comandi.py`): comando dall'esterno del grafo con esito strutturato e decisione registrata.
 - [x] Log JSON, `LANGBRAIN_REQUIRE_API_KEY`, conservazione dei dati (`app/core/conservazione.py`, disattivata di predefinito).
-- [x] CI su GitHub con SQLite (3.12 e 3.14), Postgres 16, Docker e sicurezza.
+- [x] CI su GitHub con SQLite (3.12 e 3.14), Postgres 16, Docker e sicurezza. Esistono su `origin` i tag `poc-contratto-1.0.4-base` (`3cb93f6`), `-rc1` (`4a679fb`) e `-rc2` (`a9cccc2`) e il ramo `poc-sqlite` (`3cb93f6`, solo correzioni del PoC).
 - [x] Approvazioni (`app/core/approvazioni.py`): `approval_id` stabile, `description`/`reason` in italiano, una sola pendente per thread, `approve`/`reject`, seconda decisione = `already_closed`, nessun OVERRIDE.
 - [x] Bus di eventi (`app/core/bus_eventi.py`): id monotono persistito e mai riusato, `Last-Event-ID`, buffer di almeno un'ora, `: ping`, solo i sette tipi del contratto e solo ciò che si pubblica. Manca la rotta HTTP `/stream`, che è dell'adattatore.
 - [ ] Provider `agent_platform` nel MAO (endpoint OpenAI-compatibile, credenziali Google dell'account di servizio, `GCP_PROJECT`, `GCP_LOCATION`): in attesa dei parametri da HQ.

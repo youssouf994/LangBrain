@@ -71,11 +71,24 @@ def url_configurato() -> str | None:
     return valore
 
 
+def _avvisa_database_url_non_piu_letta() -> None:
+    """
+    `DATABASE_URL` (usata dalle versioni di sviluppo del ramo Postgres) non viene più letta. Chi l'ha impostata e non ha
+    `LANGBRAIN_DB_URL` userebbe SQLite senza accorgersene: lo si dice chiaramente nel log, senza fallback silenzioso.
+    """
+    if (os.getenv("DATABASE_URL") or "").strip() and not (os.getenv("LANGBRAIN_DB_URL") or "").strip():
+        logger.warning(
+            "DATABASE_URL è impostata ma il nucleo non la legge più: per usare Postgres imposta LANGBRAIN_DB_BACKEND=postgres e "
+            "LANGBRAIN_DB_URL con lo stesso URL (oggi si usa %s).",
+            "SQLite (" + _db_path_predefinito() + ")" if backend() != BACKEND_POSTGRES else "il backend indicato")
+
+
 def verifica_configurazione() -> None:
     """
     Da chiamare all'avvio: rifiuta una scelta di database incompleta (backend sconosciuto, `postgres` senza URL o con un
     URL che non è Postgres). Con SQLite non c'è nulla da verificare.
     """
+    _avvisa_database_url_non_piu_letta()
     url = url_configurato()
     if url is not None:
         url_database(_db_path_predefinito())  # solleva se l'URL non è di un database supportato
