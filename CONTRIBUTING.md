@@ -18,6 +18,10 @@ cp .env.example .env                # poi inserisci almeno una chiave di un prov
 
 1. `python -m pytest tests` deve passare. I test usano database temporanei e non chiamano LLM reali: un test nuovo
    non deve dipendere dal tuo `.env` né toccare `langbrain.db`.
+   Per provare anche Postgres: `docker compose -f docker-compose.test.yml up -d`, poi
+   `TEST_PG_URL=postgresql://postgres:prova@localhost:55433/langbrain_test TEST_DATABASE_URL=$TEST_PG_URL python -m pytest tests`
+   (ogni database temporaneo diventa uno schema; la CI lo fa in un job a parte). I test che aprono il file SQLite con
+   `sqlite3` sono elencati in `tests/pg_isolamento.py` e su Postgres si saltano.
 2. Una correzione di bug porta un test che fallisce senza la correzione.
 3. `bash scripts/scansione_sicurezza.sh` non deve trovare segreti né vulnerabilità (servono `gitleaks` e `pip-audit`).
 4. Se cambi comportamento o configurazione, aggiorna `docs/HOW_TO_CUSTOMIZE.md` e, se serve, i README.

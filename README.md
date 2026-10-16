@@ -26,7 +26,7 @@ python examples/avvia_demo.py                      # scenario di prova + pagina 
 
 La demo crea un database dedicato (`demo.db`, i tuoi dati non vengono toccati), avvia il server e apre `http://127.0.0.1:8765/demo`. Premi **Esegui un ciclo**: i nodi della gerarchia si illuminano uno dopo l'altro mentre gli agenti (modelli reali) ragionano, gli eventi e i dispositivi si aggiornano e, quando il Brain chiede l'approvazione per la porta, decidi tu con **Approva** o **Respingi**.
 
-Per il server vero: `python -m uvicorn app.api.main:app` (un processo) oppure `python -m app.serve` (più processi: l'app è usabile da più persone contemporaneamente) oppure `docker compose up`. Il database è SQLite (file `DB_PATH`) di default; con `DATABASE_URL=postgresql://...` (anche in `docker compose`) è Postgres. Le scelte dell'utente (dispositivi e valori ammessi, provider e modelli, HITL, timer) stanno in [`configurazione.toml`](configurazione.toml), i segreti nel `.env`. La guida completa è in [`docs/HOW_TO_CUSTOMIZE.md`](docs/HOW_TO_CUSTOMIZE.md); sicurezza e contributi in [`SECURITY.md`](SECURITY.md) e [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Per il server vero: `python -m uvicorn app.api.main:app` (un processo) oppure `python -m app.serve` (più processi: l'app è usabile da più persone contemporaneamente) oppure `docker compose up`. Il database è SQLite (file `DB_PATH`) di default; con `LANGBRAIN_DB_BACKEND=postgres` e `LANGBRAIN_DB_URL=postgresql://...` (anche in `docker compose`) è Postgres; come tornare indietro: [`docs/ROLLBACK.md`](docs/ROLLBACK.md). Le scelte dell'utente (dispositivi e valori ammessi, provider e modelli, HITL, timer) stanno in [`configurazione.toml`](configurazione.toml), i segreti nel `.env`. La guida completa è in [`docs/HOW_TO_CUSTOMIZE.md`](docs/HOW_TO_CUSTOMIZE.md); sicurezza e contributi in [`SECURITY.md`](SECURITY.md) e [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ---
 
@@ -248,7 +248,7 @@ LangBrain/
 | Framework Agenti | **LangGraph** | Grafi stateful con cicli, routing condizionale e checkpointing nativo |
 | Provider LLM | **MAO Proxy** | OpenRouter, Google AI Studio (Gemini), Mistral e LLM locali (vLLM, LM Studio), con modello per singolo agente |
 | API Server | **FastAPI** | Server HTTP/REST asincrono 100% headless con Swagger UI interattiva |
-| Database | **SQLite** (predefinito) o **Postgres** (`DATABASE_URL`), via SQLAlchemy | Zero setup in locale; Postgres per deploy con filesystem effimero (Scaleway, Supabase...). Persistenza audit log, registro agenti e stato |
+| Database | **SQLite** (predefinito) o **Postgres** (`LANGBRAIN_DB_BACKEND=postgres`), via SQLAlchemy | Zero setup in locale; Postgres per deploy con filesystem effimero (Scaleway, Supabase...). Persistenza audit log, registro agenti e stato |
 
 ---
 
