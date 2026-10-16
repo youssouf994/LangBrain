@@ -64,6 +64,29 @@ class UrlTest(unittest.TestCase):
         self.assertEqual(archivio.schema_dell_url(archivio.url_database(url)), "s1")
         self.assertIn("search_path%3Ds1", archivio.url_per_psycopg(url).replace("+", "%20").replace("%3D", "%3D"))
 
+    def test_database_url_non_piu_letta_avvisa_nel_log_senza_cambiare_database(self):
+        with mock.patch.dict(os.environ, {"DATABASE_URL": "postgresql://u:segretissima@h/d"}):
+            os.environ.pop("LANGBRAIN_DB_URL", None)
+            os.environ.pop("LANGBRAIN_DB_BACKEND", None)
+            with self.assertLogs("app.core.archivio", level="WARNING") as log:
+                archivio.verifica_configurazione()
+            testo = " ".join(log.output)
+            self.assertIn("LANGBRAIN_DB_BACKEND=postgres", testo)
+            self.assertIn("LANGBRAIN_DB_URL", testo)
+            self.assertNotIn("segretissima", testo)          # l'URL non finisce nel log
+            self.assertFalse(archivio.e_postgres())            # nessun fallback silenzioso: resta SQLite
+
+    def test_nessun_avviso_se_database_url_non_e_impostata_o_c_e_gia_il_nuovo_url(self):
+        with mock.patch.dict(os.environ, {"LANGBRAIN_DB_BACKEND": "postgres", "LANGBRAIN_DB_URL": "postgresql://u:p@h/d",
+                                          "DATABASE_URL": "postgresql://u:p@h/d"}):
+            with self.assertNoLogs("app.core.archivio", level="WARNING"):
+                archivio.verifica_configurazione()
+        with mock.patch.dict(os.environ, {"DATABASE_URL": ""}):
+            os.environ.pop("LANGBRAIN_DB_URL", None)
+            os.environ.pop("LANGBRAIN_DB_BACKEND", None)
+            with self.assertNoLogs("app.core.archivio", level="WARNING"):
+                archivio.verifica_configurazione()
+
     def test_password_mascherata(self):
         self.assertNotIn("segreta", archivio.url_mascherato("postgresql://u:segreta@h/d"))
 
