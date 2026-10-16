@@ -100,7 +100,7 @@ Nel nucleo, pronto perché un adattatore (codice di HQ) si monti sopra senza for
 - [x] `tenta_comando` (`app/core/comandi.py`): comando dall'esterno del grafo con esito strutturato e decisione registrata.
 - [x] Log JSON, `LANGBRAIN_REQUIRE_API_KEY`, conservazione dei dati (`app/core/conservazione.py`, disattivata di predefinito).
 - [x] CI su GitHub con SQLite (3.12 e 3.14), Postgres 16, Docker e sicurezza.
-- [ ] Semantica delle approvazioni (`approval_id` stabile, `already_closed`, una sola pendente): da fare.
-- [ ] Bus di eventi con id monotono persistito per l'SSE del contratto: da fare.
+- [x] Approvazioni (`app/core/approvazioni.py`): `approval_id` stabile, `description`/`reason` in italiano, una sola pendente per thread, `approve`/`reject`, seconda decisione = `already_closed`, nessun OVERRIDE.
+- [x] Bus di eventi (`app/core/bus_eventi.py`): id monotono persistito e mai riusato, `Last-Event-ID`, buffer di almeno un'ora, `: ping`, solo i sette tipi del contratto e solo ciò che si pubblica. Manca la rotta HTTP `/stream`, che è dell'adattatore.
 - [ ] Provider `agent_platform` nel MAO (endpoint OpenAI-compatibile, credenziali Google dell'account di servizio, `GCP_PROJECT`, `GCP_LOCATION`): in attesa dei parametri da HQ.
 - [ ] Adattatori hardware reali (Shelly via WebSocket, MQTT) e stato fisico dei dispositivi riconciliato dopo il riavvio.

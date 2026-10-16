@@ -72,6 +72,14 @@ routes and the old table are accepted as aliases. `tests/` still imports the old
 - **Data retention** (`app/core/conservazione.py`): `LANGBRAIN_RETENTION_EVENTI_GIORNI` and
   `LANGBRAIN_RETENTION_COMANDI_GIORNI` (0 = off, the default; commands are cleaned by whoever holds them through
   `registra_pulizia_comandi`).
+- **Approvals** (`app/core/approvazioni.py`): a pending HITL interrupt as an object with a stable `approval_id` (the
+  LangGraph interrupt id), `description` and `reason` in Italian, expiry and the action at expiry. `decidi` accepts
+  `approve`/`reject` only (no OVERRIDE), returns `already_closed` for a second decision instead of raising, serializes
+  concurrent decisions, and records the decision with `approval_id` and the requester as actor.
+- **Event bus** (`app/core/bus_eventi.py`, table `stream_events`): `pubblica`, `leggi_da(Last-Event-ID)`, `flusso` (SSE with
+  `: ping`). The id is monotonic, persisted and never reused (not even after a restart or a buffer cleanup); the buffer keeps
+  at least one hour (`LANGBRAIN_STREAM_BUFFER_ORE`, default 24); only the contract's seven event types are accepted and
+  nothing from the graph is published unless a caller does it explicitly.
 - **CI on GitHub**: SQLite on Python 3.12 and 3.14, the whole suite on Postgres 16, Docker image build with startup, gitleaks
   and pip-audit; the `conformita` job is disabled (it lives in HQ's fork).
 

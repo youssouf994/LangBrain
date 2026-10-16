@@ -125,7 +125,7 @@ In the core, so that an adapter (HQ's code) can mount on top without forcing any
 - [x] `tenta_comando` (`app/core/comandi.py`): a command from outside the graph with a structured outcome and a recorded decision.
 - [x] JSON logs, `LANGBRAIN_REQUIRE_API_KEY`, data retention (`app/core/conservazione.py`, off by default).
 - [x] CI on GitHub with SQLite (3.12 and 3.14), Postgres 16, Docker and security.
-- [ ] Approval semantics (stable `approval_id`, `already_closed`, a single pending one): to do.
-- [ ] Event bus with a persisted monotonic id for the contract's SSE: to do.
+- [x] Approvals (`app/core/approvazioni.py`): stable `approval_id`, `description`/`reason` in Italian, a single pending one per thread, `approve`/`reject`, a second decision = `already_closed`, no OVERRIDE.
+- [x] Event bus (`app/core/bus_eventi.py`): persisted monotonic id that is never reused, `Last-Event-ID`, buffer of at least one hour, `: ping`, only the contract's seven types and only what is published. The `/stream` HTTP route is missing: it belongs to the adapter.
 - [ ] `agent_platform` provider in the MAO (OpenAI-compatible endpoint, the service account's Google credentials, `GCP_PROJECT`, `GCP_LOCATION`): waiting for HQ's parameters.
 - [ ] Real hardware adapters (Shelly over WebSocket, MQTT) and physical device state reconciled after a restart.
