@@ -26,6 +26,7 @@ from pydantic import BaseModel
 
 from app.api.settings_routes import register_routes as register_settings_routes
 from app.agents.agent_registry import AgenteConFigliError, AgentRegistry, ErroreGerarchia
+from app.core import conservazione
 from app.core.avvio import verifica_avvio
 from app.core.contesto import MiddlewareContesto
 from app.core.log_json import configura_log
@@ -163,13 +164,14 @@ async def lifespan(app: FastAPI):
     installa_filtro_accessi()
     # Compiti in background: con più processi ciascuno gira in uno solo alla volta (multiprocesso.compito_leader).
     sorveglianza_timer = asyncio.create_task(multiprocesso.compito_leader("hitl_timer", gestore_timer.sorveglia))
+    conservazione_dati = asyncio.create_task(multiprocesso.compito_leader("conservazione", conservazione.sorveglia))
     # ...e quelli dei nodi installati (es. lettura di una casella di posta, scadenze proprie).
     compiti_estensioni = [asyncio.create_task(multiprocesso.compito_leader(f"{e.nome}.{compito.__name__}", compito))
                           for e in carica_estensioni() for compito in e.compiti]
     try:
         yield
     finally:
-        for compito in (sorveglianza_timer, *compiti_estensioni):
+        for compito in (sorveglianza_timer, conservazione_dati, *compiti_estensioni):
             compito.cancel()
             try:
                 await compito
