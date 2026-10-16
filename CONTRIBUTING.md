@@ -46,4 +46,5 @@ pagina che mostra il grafo in azione.
 
 Un caso d'uso (un nodo) non modifica il core: si aggancia con un modulo in `app/nodes/` che espone `ESTENSIONE`
 (`app/core/estensioni.py`, `docs/HOW_TO_CUSTOMIZE.md` sezione 10). Il core non deve mai nominare un nodo. Le modifiche al
-framework si fanno qui; i repository dei nodi le ricevono con un merge di `main` (workflow `notify-nodes.yml`).
+framework si fanno qui; i repository dei nodi le ricevono con un merge di `main`, quando vogliono (il nodo ha un sync giornaliero
+suo e `scripts/core_sync.py`): il core non avvisa nessuno.

@@ -1,0 +1,12 @@
+# Configurazione di gitleaks per questo repository (letta in automatico da `gitleaks git .` e da `gitleaks dir`).
+title = "LangBrain"
+
+[extend]
+useDefault = true
+
+# Falso positivo noto: nel test del ricaricamento delle chiavi (`tests/test_errori_llm.py`) due MISTRAL_API_KEY sono valori finti scritti
+# nel file .env temporaneo del test. Vale solo per la regola generic-api-key e solo per quel file.
+[[allowlists]]
+description = "valori finti di MISTRAL_API_KEY nel test del ricaricamento delle chiavi"
+targetRules = ["generic-api-key"]
+paths = ['''tests/test_errori_llm\.py$''']

@@ -60,7 +60,7 @@ physical state of the (simulated) devices is in memory, observability is missing
   `test_validazione_gerarchia`) hang for 60 s and fail with `TimeoutError` (asyncpg's default connect timeout), and the suite takes 130-290 s
   instead of 80. It is not core code: with the container on the **same Docker network** as Postgres (service name, no port forwarding) the whole
   suite passes (530 passed, 0 failed in 79 s, even with `--cpus 1`), and CI on GitHub never saw it. See the Italian status for the reproduction.
-- **Windows suite, 11 known `WinError 32` failures**: see `tests_windows/README.md` (cause and tests).
+- **Windows suite**: no known failures. The previous 11 `WinError 32` were the tests' fault (`with sqlite3.connect(...)` does not close the file) and are fixed with `connetti` in `tests/sqlite_chiusura.py`; details in `tests_windows/README.md` (Italian).
 - **Override**: turning the directive into commands is left to the LLM; every command still goes through the list of
   allowed devices and is traced in the audit log with `actor: "Brain_Override"`.
 
