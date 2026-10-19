@@ -100,7 +100,7 @@ CORE_FIELDS: tuple[Field, ...] = (
     env_field("MISTRAL_BASE_URL", "mistral", default="https://api.mistral.ai/v1"),
     env_field("ANTHROPIC_API_KEY", "anthropic", "secret"),
     env_field("ANTHROPIC_MODEL", "anthropic", default="claude-haiku-5-5"),
-    env_field("ANTHROPIC_BASE_URL", "anthropic", default="https://api.anthropic.com/v1/"),
+    env_field("ANTHROPIC_BASE_URL", "anthropic", default="https://api.anthropic.com"),
     env_field("LOCAL_MODEL", "local", default="local-model"),
     env_field("LOCAL_MODEL_BASE_URL", "local", default="http://127.0.0.1:8080/v1"),
     env_field("LOCAL_MODEL_DOCKER_BASE_URL", "local", default="http://host.docker.internal:8080/v1"),

@@ -2,6 +2,8 @@ import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from anthropic import AsyncAnthropic
+
 from app.core.configurazione import costruisci_configurazione, imposta_configurazione
 from app.core.errori_llm import ErroreLLM
 from app.MAO.model_access_object import Mao, normalizza_provider
@@ -206,33 +208,46 @@ if __name__ == "__main__":
 
 class ProviderAnthropicTest(unittest.IsolatedAsyncioTestCase):
     def crea_mao(self, **env):
-        base = {"ANTHROPIC_API_KEY": "chiave-anthropic", "ANTHROPIC_MODEL": "", "ANTHROPIC_BASE_URL": "", **env}
-        for nome in ("ANTHROPIC_MODEL", "ANTHROPIC_BASE_URL"):
-            if not base[nome]:
-                base.pop(nome)
-                os.environ.pop(nome, None)
+        base = {"ANTHROPIC_API_KEY": "chiave-anthropic", **env}
+        os.environ.pop("ANTHROPIC_MODEL", None)
+        os.environ.pop("ANTHROPIC_BASE_URL", None)
         with patch.dict(os.environ, base):
-            return Mao()
-
-    async def test_il_provider_anthropic_e_registrato_con_url_e_modello_di_default(self):
-        mao = self.crea_mao()
+            mao = Mao()
         self.addAsyncCleanup(mao.aclose)
-        cfg = mao.providers["anthropic"]
-        self.assertEqual(str(cfg["client"].base_url).rstrip("/"), "https://api.anthropic.com/v1")
+        return mao
+
+    @staticmethod
+    def messaggio(testo, stop_reason="end_turn"):
+        blocco = MagicMock(type="text")
+        blocco.text = testo
+        return MagicMock(content=[blocco], stop_reason=stop_reason)
+
+    async def test_il_provider_anthropic_usa_il_client_nativo_con_modello_di_default(self):
+        cfg = self.crea_mao().providers["anthropic"]
+        self.assertIsInstance(cfg["client"], AsyncAnthropic)
+        self.assertEqual(str(cfg["client"].base_url).rstrip("/"), "https://api.anthropic.com")
         self.assertEqual(cfg["model"], "claude-haiku-5-5")
         self.assertTrue(cfg["enabled"])
 
     async def test_senza_chiave_o_con_il_segnaposto_e_disabilitato(self):
         for valore in ("nessuna", "", "replace-with-your-anthropic-api-key"):
             with self.subTest(valore=valore):
-                mao = self.crea_mao(ANTHROPIC_API_KEY=valore)
-                self.addAsyncCleanup(mao.aclose)
-                self.assertFalse(mao.providers["anthropic"]["enabled"])
+                self.assertFalse(self.crea_mao(ANTHROPIC_API_KEY=valore).providers["anthropic"]["enabled"])
 
-    async def test_l_alias_claude_usa_il_client_anthropic(self):
+    async def test_la_chiamata_usa_messages_api_con_system_separato_e_l_alias_claude(self):
         mao = self.crea_mao()
-        self.addAsyncCleanup(mao.aclose)
         self.assertEqual(normalizza_provider("Claude"), "anthropic")
-        create = AsyncMock(return_value=risposta("ciao da claude"))
-        with patch.object(mao.providers["anthropic"]["client"].chat.completions, "create", create):
-            self.assertEqual(await mao.call_model("s", "u", provider="claude"), "ciao da claude")
+        create = AsyncMock(return_value=self.messaggio("ciao da claude"))
+        with patch.object(mao.providers["anthropic"]["client"].messages, "create", create):
+            self.assertEqual(await mao.call_model("sistema", "utente", provider="claude", max_tokens=100), "ciao da claude")
+        kwargs = create.call_args.kwargs
+        self.assertEqual((kwargs["system"], kwargs["messages"], kwargs["max_tokens"]),
+                         ("sistema", [{"role": "user", "content": "utente"}], 100))
+
+    async def test_risposta_troncata_raddoppia_i_token(self):
+        mao = self.crea_mao()
+        create = AsyncMock(side_effect=[self.messaggio("tagl", "max_tokens"), self.messaggio("completa")])
+        with patch.object(mao.providers["anthropic"]["client"].messages, "create", create):
+            risultato = await mao.call_model("s", "u", provider="anthropic", max_tokens=10, rigenera_se_troncata=True)
+        self.assertEqual(risultato, "completa")
+        self.assertEqual([c.kwargs["max_tokens"] for c in create.call_args_list], [mao.max_tokens_minimo, mao.max_tokens_minimo * 2])

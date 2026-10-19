@@ -151,7 +151,7 @@
     "hlp_env_mistral_base_url": "Indirizzo dell'API di Mistral.",
     "hlp_env_anthropic_api_key": "Chiave dell'API Anthropic (console.anthropic.com). Solo scrittura.",
     "hlp_env_anthropic_model": "Nome del modello Claude.",
-    "hlp_env_anthropic_base_url": "Indirizzo compatibile OpenAI dell'API Anthropic.",
+    "hlp_env_anthropic_base_url": "Indirizzo dell'API di Anthropic.",
     "hlp_env_local_model": "Nome del modello servito in locale.",
     "hlp_env_local_model_base_url": "Indirizzo del server locale compatibile OpenAI.",
     "hlp_env_local_model_docker_base_url": "Indirizzo usato solo dal container Docker per raggiungere il modello sull'host.",

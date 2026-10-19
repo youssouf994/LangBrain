@@ -1,6 +1,8 @@
 import logging
 import os
 import httpx
+import httpx2
+from anthropic import AsyncAnthropic
 from dotenv import dotenv_values, find_dotenv, load_dotenv
 from openai import AsyncOpenAI
 
@@ -135,6 +137,11 @@ class Mao:
             transport=httpx.AsyncHTTPTransport(local_address="0.0.0.0"),
             timeout=self.timeout_seconds,
         )
+        # L'SDK di Anthropic usa httpx2 e rifiuta i client httpx: stesso trasporto IPv4, libreria diversa.
+        self.http_client_anthropic = httpx2.AsyncClient(
+            transport=httpx2.AsyncHTTPTransport(local_address="0.0.0.0"),
+            timeout=self.timeout_seconds,
+        )
 
         # Mappa dei client OpenAI-compatibili. Per aggiungere un provider basta una riga con `_crea_provider`.
         self.providers = {
@@ -162,11 +169,11 @@ class Mao:
                 url_default="https://api.mistral.ai/v1", modello_env="MISTRAL_MODEL",
                 modello_default="ministral-8b-latest", max_retries=2,
             ),
-            # Claude tramite lo strato OpenAI-compatibile dell'API Anthropic (stesso client degli altri provider).
+            # Claude usa il client nativo di Anthropic (Messages API), non lo strato OpenAI-compatibile.
             "anthropic": self._crea_provider(
                 "anthropic", chiavi_env=("ANTHROPIC_API_KEY",), url_env="ANTHROPIC_BASE_URL",
-                url_default="https://api.anthropic.com/v1/", modello_env="ANTHROPIC_MODEL",
-                modello_default="claude-haiku-5-5", max_retries=2,
+                url_default="https://api.anthropic.com", modello_env="ANTHROPIC_MODEL",
+                modello_default="claude-haiku-5-5", max_retries=2, client_nativo=AsyncAnthropic,
             ),
         }
 
@@ -182,18 +189,20 @@ class Mao:
         max_retries: int,
         intestazioni: dict[str, str] | None = None,
         sempre_attivo: bool = False,
+        client_nativo: type | None = None,
     ) -> dict:
         """
         Costruisce la voce di un provider OpenAI-compatibile leggendo dall'ambiente chiave (la prima variabile
         valorizzata tra `chiavi_env`), URL e modello. I modelli di ripiego vengono da configurazione.toml.
         Un provider senza chiave utilizzabile resta escluso dalle catene di ripiego (`enabled` False).
+        `client_nativo` sostituisce AsyncOpenAI con l'SDK del provider (stessi parametri base_url, api_key, http_client).
         """
         chiave = next((os.getenv(k) for k in chiavi_env if os.getenv(k)), "nessuna").strip().strip('"\'')
         return {
-            "client": AsyncOpenAI(
+            "client": (client_nativo or AsyncOpenAI)(
                 base_url=os.getenv(url_env, url_default).strip().strip('"\''),
                 api_key=chiave,
-                http_client=self.http_client,
+                http_client=self.http_client_anthropic if client_nativo else self.http_client,
                 max_retries=max_retries,
                 **({"default_headers": intestazioni} if intestazioni else {}),
             ),
@@ -205,9 +214,10 @@ class Mao:
     async def _aggiorna_configurazione_se_cambiata(self) -> None:
         ricarica_env_se_modificato()
         if self._generazione_config != _generazione_env:
-            vecchio_client = self.http_client
+            vecchi_client = (self.http_client, self.http_client_anthropic)
             self._configura()
-            await vecchio_client.aclose()
+            for vecchio in vecchi_client:
+                await vecchio.aclose()
 
     @staticmethod
     def _come_errore_llm(errore: BaseException, provider: str, modello: str | None) -> ErroreLLM:
@@ -220,7 +230,7 @@ class Mao:
 
     async def _chiedi_modello(
         self,
-        client: AsyncOpenAI,
+        client: AsyncOpenAI | AsyncAnthropic,
         provider_key: str,
         modello: str,
         system_prompt: str,
@@ -235,23 +245,18 @@ class Mao:
             tokens = min(max(max_tokens, self.max_tokens_minimo), self.max_tokens_limite)
 
         while True:
-            kwargs = {
-                "model": modello,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "temperature": temperature,
-                "max_tokens": tokens,
-            }
-            if enable_reasoning:
-                kwargs["extra_body"] = {"reasoning": {"enabled": True}}
+            if isinstance(client, AsyncAnthropic):
+                # Messages API: il system prompt è un parametro a parte e max_tokens è obbligatorio.
+                risposta = await client.messages.create(
+                    model=modello, system=system_prompt, messages=[{"role": "user", "content": user_prompt}],
+                    temperature=temperature, max_tokens=tokens,
+                )
+                contenuto = "".join(b.text for b in risposta.content if getattr(b, "type", None) == "text").strip()
+                troncata = risposta.stop_reason == "max_tokens"
+            else:
+                contenuto, troncata = await self._chiedi_openai(client, modello, system_prompt, user_prompt, temperature, tokens, enable_reasoning)
 
-            response = await client.chat.completions.create(**kwargs)
-            scelta = response.choices[0] if response.choices else None
-            contenuto = ((scelta.message.content if scelta else None) or "").strip()
-
-            if scelta is not None and scelta.finish_reason == "length" and rigenera_se_troncata:
+            if troncata and rigenera_se_troncata:
                 if tokens < self.max_tokens_limite:
                     nuovo_limite = min(tokens * 2, self.max_tokens_limite)
                     logger.warning(
@@ -271,6 +276,26 @@ class Mao:
                 )
             return contenuto
 
+    @staticmethod
+    async def _chiedi_openai(client, modello, system_prompt, user_prompt, temperature, tokens, enable_reasoning) -> tuple[str, bool]:
+        """Una chiamata chat-completions OpenAI-compatibile. Restituisce (testo, risposta_troncata)."""
+        kwargs = {
+            "model": modello,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": temperature,
+            "max_tokens": tokens,
+        }
+        if enable_reasoning:
+            kwargs["extra_body"] = {"reasoning": {"enabled": True}}
+
+        response = await client.chat.completions.create(**kwargs)
+        scelta = response.choices[0] if response.choices else None
+        contenuto = ((scelta.message.content if scelta else None) or "").strip()
+        return contenuto, scelta is not None and scelta.finish_reason == "length"
+
     async def _execute_chat(
         self,
         provider_key: str,
@@ -287,7 +312,7 @@ class Mao:
         if not p_cfg:
             raise ErroreLLM("PROVIDER_NON_SUPPORTATO", f"Provider '{provider_key}' non supportato o non configurato.", provider=provider_key)
 
-        client: AsyncOpenAI = p_cfg["client"]
+        client = p_cfg["client"]
         target_model = model or p_cfg["model"]
         candidate_models = [target_model]
         if self.fallback:
@@ -399,5 +424,6 @@ class Mao:
         return {"provider": nome, "model": modello or (cfg["model"] if cfg else None), "abilitato": bool(cfg and cfg["enabled"])}
 
     async def aclose(self) -> None:
-        """Chiude il client HTTP asincrono condiviso dai provider."""
+        """Chiude i client HTTP asincroni condivisi dai provider."""
         await self.http_client.aclose()
+        await self.http_client_anthropic.aclose()
