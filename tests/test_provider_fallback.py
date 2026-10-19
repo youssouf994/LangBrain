@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.configurazione import costruisci_configurazione, imposta_configurazione
 from app.core.errori_llm import ErroreLLM
-from app.MAO.model_access_object import Mao
+from app.MAO.model_access_object import Mao, normalizza_provider
 
 CHIAVI = {
     "GEMINI_API_KEY": "chiave-google", "OPENROUTER_API_KEY": "chiave-openrouter", "MISTRAL_API_KEY": "chiave-mistral",
@@ -202,3 +202,37 @@ class CatenaDiRipiegoTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProviderAnthropicTest(unittest.IsolatedAsyncioTestCase):
+    def crea_mao(self, **env):
+        base = {"ANTHROPIC_API_KEY": "chiave-anthropic", "ANTHROPIC_MODEL": "", "ANTHROPIC_BASE_URL": "", **env}
+        for nome in ("ANTHROPIC_MODEL", "ANTHROPIC_BASE_URL"):
+            if not base[nome]:
+                base.pop(nome)
+                os.environ.pop(nome, None)
+        with patch.dict(os.environ, base):
+            return Mao()
+
+    async def test_il_provider_anthropic_e_registrato_con_url_e_modello_di_default(self):
+        mao = self.crea_mao()
+        self.addAsyncCleanup(mao.aclose)
+        cfg = mao.providers["anthropic"]
+        self.assertEqual(str(cfg["client"].base_url).rstrip("/"), "https://api.anthropic.com/v1")
+        self.assertEqual(cfg["model"], "claude-haiku-5-5")
+        self.assertTrue(cfg["enabled"])
+
+    async def test_senza_chiave_o_con_il_segnaposto_e_disabilitato(self):
+        for valore in ("nessuna", "", "replace-with-your-anthropic-api-key"):
+            with self.subTest(valore=valore):
+                mao = self.crea_mao(ANTHROPIC_API_KEY=valore)
+                self.addAsyncCleanup(mao.aclose)
+                self.assertFalse(mao.providers["anthropic"]["enabled"])
+
+    async def test_l_alias_claude_usa_il_client_anthropic(self):
+        mao = self.crea_mao()
+        self.addAsyncCleanup(mao.aclose)
+        self.assertEqual(normalizza_provider("Claude"), "anthropic")
+        create = AsyncMock(return_value=risposta("ciao da claude"))
+        with patch.object(mao.providers["anthropic"]["client"].chat.completions, "create", create):
+            self.assertEqual(await mao.call_model("s", "u", provider="claude"), "ciao da claude")

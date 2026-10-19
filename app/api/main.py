@@ -303,7 +303,7 @@ class CreateSubAgentRequest(BaseModel):
 class ModelloAgenteRequest(BaseModel):
     """Provider e modello LLM propri di un agente. Se non impostati un agente eredita quelli del padre."""
     provider: str
-    """Uno tra google_studio, openrouter, mistral, local (il provider deve avere la chiave configurata)."""
+    """Uno tra google_studio, openrouter, mistral, anthropic, local (il provider deve avere la chiave configurata)."""
     model: str | None = None
     """Facoltativo: se omesso si usa il modello di default del provider (es. MISTRAL_MODEL)."""
 

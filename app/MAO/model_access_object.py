@@ -54,8 +54,8 @@ def ricarica_env_se_modificato() -> bool:
 
 
 # Provider gestiti dal MAO e alias accettati (DEFAULT_PROVIDER, impostazioni per agente, parametro `provider`).
-PROVIDER_NOTI = ("google_studio", "openrouter", "mistral", "local")
-_ALIAS_PROVIDER = {"google": "google_studio", "gemini": "google_studio", "or": "openrouter", "mistralai": "mistral", "mistral_ai": "mistral"}
+PROVIDER_NOTI = ("google_studio", "openrouter", "mistral", "anthropic", "local")
+_ALIAS_PROVIDER = {"google": "google_studio", "gemini": "google_studio", "or": "openrouter", "mistralai": "mistral", "mistral_ai": "mistral", "claude": "anthropic"}
 
 
 def normalizza_provider(nome: str | None) -> str:
@@ -93,6 +93,7 @@ def _has_usable_api_key(value: str | None) -> bool:
         "replace-with-your-google-api-key",
         "replace-with-your-openrouter-api-key",
         "replace-with-your-mistral-api-key",
+        "replace-with-your-anthropic-api-key",
     }
 
 
@@ -104,7 +105,7 @@ class Mao:
         """Legge la configurazione dall'ambiente e costruisce i client dei provider."""
         self._generazione_config = _generazione_env
 
-        # Provider di default ('auto', 'google_studio', 'local', 'openrouter')
+        # Provider di default ('auto', 'google_studio', 'local', 'openrouter', 'mistral', 'anthropic')
         self.default_provider = os.getenv("DEFAULT_PROVIDER", "google_studio").strip().strip('"\'')
         logger.info(f"[MAO] Provider di default risolto: '{self.default_provider}' (da DEFAULT_PROVIDER env)")
 
@@ -160,6 +161,12 @@ class Mao:
                 "mistral", chiavi_env=("MISTRAL_API_KEY",), url_env="MISTRAL_BASE_URL",
                 url_default="https://api.mistral.ai/v1", modello_env="MISTRAL_MODEL",
                 modello_default="ministral-8b-latest", max_retries=2,
+            ),
+            # Claude tramite lo strato OpenAI-compatibile dell'API Anthropic (stesso client degli altri provider).
+            "anthropic": self._crea_provider(
+                "anthropic", chiavi_env=("ANTHROPIC_API_KEY",), url_env="ANTHROPIC_BASE_URL",
+                url_default="https://api.anthropic.com/v1/", modello_env="ANTHROPIC_MODEL",
+                modello_default="claude-haiku-5-5", max_retries=2,
             ),
         }
 

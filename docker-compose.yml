@@ -43,6 +43,9 @@ services:
       MISTRAL_API_KEY: "${MISTRAL_API_KEY:-nessuna}"
       MISTRAL_BASE_URL: "${MISTRAL_BASE_URL:-https://api.mistral.ai/v1}"
       MISTRAL_MODEL: "${MISTRAL_MODEL:-ministral-8b-latest}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-nessuna}"
+      ANTHROPIC_BASE_URL: "${ANTHROPIC_BASE_URL:-https://api.anthropic.com/v1/}"
+      ANTHROPIC_MODEL: "${ANTHROPIC_MODEL:-claude-haiku-5-5}"
       # Dentro Docker, 127.0.0.1 indica il container: per raggiungere il modello
       # avviato su Windows serve host.docker.internal.
       LOCAL_MODEL_BASE_URL: "${LOCAL_MODEL_DOCKER_BASE_URL:-http://host.docker.internal:8080/v1}"

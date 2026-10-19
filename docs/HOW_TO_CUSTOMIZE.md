@@ -43,7 +43,7 @@ Copy-Item .env.example .env
 python -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Configura almeno un provider LLM nel file `.env` (`google_studio`, `openrouter`, `mistral` o `local`, scelto con `DEFAULT_PROVIDER`) prima di eseguire cicli che invocano gli agenti. Per Mistral servono `MISTRAL_API_KEY` e, facoltativi, `MISTRAL_MODEL` (default `ministral-8b-latest`) e `MISTRAL_BASE_URL`; nessun modello Mistral è gratuito di per sé, il piano gratuito offre crediti mensili da cui vengono scalati i consumi. La documentazione interattiva sarà disponibile su `http://127.0.0.1:8000/docs`.
+Configura almeno un provider LLM nel file `.env` (`google_studio`, `openrouter`, `mistral`, `anthropic` o `local`, scelto con `DEFAULT_PROVIDER`) prima di eseguire cicli che invocano gli agenti. Per Mistral servono `MISTRAL_API_KEY` e, facoltativi, `MISTRAL_MODEL` (default `ministral-8b-latest`) e `MISTRAL_BASE_URL`; nessun modello Mistral è gratuito di per sé, il piano gratuito offre crediti mensili da cui vengono scalati i consumi. La documentazione interattiva sarà disponibile su `http://127.0.0.1:8000/docs`.
 
 Per un modello OpenAI-compatible avviato direttamente su Windows usa, per esempio, `LOCAL_MODEL_BASE_URL=http://127.0.0.1:8080/v1`. Se LangBrain gira in Docker e il modello è sull'host Windows, imposta `LOCAL_MODEL_DOCKER_BASE_URL=http://host.docker.internal:8080/v1`; se il modello è su un'altra macchina della LAN, usa lo stesso URL LAN in entrambe le variabili. `LOCAL_MODEL` deve essere l'ID esatto restituito da `GET <base_url>/models`. Il server del modello deve essere già avviato e raggiungibile.
 
