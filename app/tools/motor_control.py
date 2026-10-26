@@ -1,6 +1,7 @@
 """
 Wrapper Decoratore e Helper per l'Esecuzione Sicura dei Tool IoT.
-Fornisce retry, logging strutturato e convalida delle policy di priorità prima dell'azionamento hardware.
+Fornisce logging strutturato e convalida delle policy di priorità prima dell'azionamento hardware (nessun retry:
+un azionamento fallito è riportato a chi chiama, che decide se ripetere).
 """
 
 import logging
@@ -51,7 +52,7 @@ async def execute_tool_safely(
     try:
         if tool_obj:
             await tool_obj.set_tool_value(new_value)
-            logger.info(f"[{actor_name}] Tool '{target}' aggiornato a '{new_value}'")
+            logger.info(f"[{actor_name}] Tool '{target}' aggiornato a '{new_value}'" + (f" ({reasoning})" if reasoning else ""))
         return True, f"Tool '{target}' aggiornato a '{new_value}'"
     except Exception as e:
         logger.error(f"[{actor_name}] Errore durante l'azionamento di '{target}': {e}")

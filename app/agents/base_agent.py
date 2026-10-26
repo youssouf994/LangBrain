@@ -222,6 +222,7 @@ class BaseAgent(ABC):
     def check_for_recent_conflict(self, target: str, recent_events: list[dict], ignore_actor: str | None = None) -> tuple[bool, dict | None]:
         """
         Verifica se ci sono stati eventi recenti su 'target' da parte del Cervello o di agenti a priorità superiore.
+        Helper per gli agenti di dominio: il core non lo chiama (i blocchi li decide `trova_blocco_prevalente`).
         Esclude eventi la cui azione è già stata risolta/scaduta o che abbiano superato il TTL.
         """
         from app.core.constants import is_flag_expired
