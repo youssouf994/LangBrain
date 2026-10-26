@@ -9,7 +9,7 @@ annotated-types==0.8.0
 anthropic==1.15.0
 anyio==4.15.1
 asyncpg==0.32.0
-certifi==2026.7.22
+certifi==2026.10.19
 charset-normalizer==3.5.2
 click==8.5.0
 distro==1.9.0
@@ -31,7 +31,7 @@ langchain-protocol==0.0.19
 langgraph==1.2.11
 langgraph-checkpoint==4.3.0
 langgraph-checkpoint-postgres==3.2.0
-langgraph-checkpoint-sqlite==3.1.1
+langgraph-checkpoint-sqlite==3.1.2
 langgraph-prebuilt==1.1.1
 langgraph-sdk==0.4.7
 langsmith==0.14.9

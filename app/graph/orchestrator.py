@@ -12,7 +12,7 @@ from app.core.lingua import scegli
 from app.core.prompt import compila_template, prompt_di_sistema
 from app.core.risultati import APPLICATO, e_comando_non_ammesso, e_guasto_tool
 from datetime import datetime, timezone
-from app.graph.state import GraphState
+from app.graph.state import GraphState, filtra_segnali, finestra_segnali_ore
 from app.tools.reflex import Reflex
 from app.tools.effectors import default_effectors, get_tool, tool_registrati
 from app.tools.motor_control import force_execute_tool
@@ -610,7 +610,10 @@ class BrainAgent(BaseAgent):
     ) -> dict[str, Any]:
         """
         Analisi Periodica Macro (Health Check / Trend della casa).
+        Valuta i soli segnali dentro la finestra del run (`config["signals_window_hours"]` dello stato, default 4 ore):
+        quelli senza `timestamp` non si possono datare e restano.
         """
+        relevant_readings = filtra_segnali(relevant_readings, finestra_segnali_ore(state.get("config")))
         logger.info(f"[{self.name}] Esecuzione check_body_status (Analisi Macro Trend)...")
 
         flagged_readings = [

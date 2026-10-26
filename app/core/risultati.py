@@ -54,10 +54,6 @@ class ErroreTool(Exception):
         self.dettagli = dettagli or {}
 
 
-def esito_riuscito(risultato: dict[str, Any]) -> bool:
-    return bool(risultato.get("success"))
-
-
 def e_comando_non_ammesso(risultato: dict[str, Any] | None) -> bool:
     """True se il comando è stato rifiutato perché il valore o il dispositivo non sono ammessi da configurazione.toml."""
     return bool(risultato) and risultato.get("status") == COMANDO_NON_AMMESSO
