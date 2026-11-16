@@ -19,7 +19,12 @@ LangBrain è un framework per dispositivi IoT e agenti LLM, pensato per essere e
   oscurano le chiavi. Le chiavi presenti in `.env.example` e nei test sono segnaposto.
 - **Comandi ai dispositivi**: nessun agente può attuare un dispositivo o un valore non elencato in
   `configurazione.toml`; con `dispositivi_non_elencati = "rifiuta"` (predefinito) un nome nuovo viene respinto.
-- **Un solo worker**: stato dei tool, configurazione HITL e grafo sono in memoria del processo; non avviare più worker.
+- **Più processi**: `python -m app.serve` condivide lo stato (configurazione HITL, grafo, valori simulati, metriche) nel database; `python -m uvicorn` è un processo solo.
+  Gli interruttori di circuito e i budget dei modelli sono per processo (il budget si divide).
+- **Metriche**: `GET /metrics` richiede il ruolo `tirocinante` quando le chiavi sono attive; non espone segreti ma elenca nomi di dispositivi, nodi e modelli.
+- **Dispositivi veri**: il token del gateway sta solo nel `.env` (`token_env`), mai in `configurazione.toml`; gli URL dei dispositivi li sceglie chi modifica la configurazione
+  (ruolo `primario`). Il sistema non comanda mai un dispositivo vero da solo per "ripristinare" uno stato, né durante `DELETE /system/reset`.
+- **Migrazioni**: in produzione usa `LANGBRAIN_MIGRAZIONI=manuale` ed esegui `alembic upgrade head` dopo un backup (`docs/MIGRAZIONI.md`).
 
 ## Controlli prima di pubblicare
 

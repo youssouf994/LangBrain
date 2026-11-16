@@ -31,6 +31,28 @@ openrouter = ["google/gemma-4-31b-it:free", "nvidia/nemotron-3-super-120b-a12b:f
 mistral = ["ministral-3b-latest"]
 google_studio = ["gemini-flash-latest"]
 
+# Protezione dei modelli (interruttore di circuito): dopo `soglia_errori` errori di fila di un modello (provider non
+# raggiungibile, errore del provider, limite di richieste, crediti, chiave) le chiamate a quel modello sono respinte subito
+# con CIRCUITO_APERTO per `pausa_secondi`; poi una chiamata di prova decide se riaprire. Gli errori della singola richiesta
+# (risposta troncata, contesto superato) non lo aprono. Vedi docs/OSSERVABILITA.md.
+[llm.protezione]
+soglia_errori = 5
+pausa_secondi = 60
+
+# Timeout massimo di un tentativo, per provider o per "provider/modello". Senza voce vale MAO_TIMEOUT_SECONDS.
+# [llm.timeout_secondi]
+# mistral = 20
+# "openrouter/qwen/qwen3.8-27b:free" = 60
+
+# Budget per provider (0 o assente = nessun limite): richieste nell'ultima ora e token STIMATI (4 caratteri per token) del
+# giorno UTC. Esaurito il budget la chiamata è respinta con BUDGET_ESAURITO e il grafo si ferma per l'operatore. Con più
+# processi (python -m app.serve) il limite si divide tra i processi. Le voci sotto [llm.budget] valgono per tutti i provider;
+# [llm.budget.<provider>] le sostituisce per quel provider.
+# [llm.budget]
+# richieste_ora = 600
+# [llm.budget.openrouter]
+# token_giorno = 200000
+
 # ---------------------------------------------------------------------------
 # Human-in-the-Loop: timer di attesa dell'operatore
 # ---------------------------------------------------------------------------
@@ -78,6 +100,18 @@ conflitto_all_avvio = 0
 pagina_web = 1
 
 # ---------------------------------------------------------------------------
+# Stato fisico dei dispositivi
+# ---------------------------------------------------------------------------
+[stato_fisico]
+# 1: ogni comando riuscito salva l'ultimo stato noto del dispositivo (tabella device_state). All'avvio il dispositivo simulato
+# ritrova il suo ultimo valore; quello vero viene riletto e confrontato con l'ultimo comando: una differenza è una "deriva" e
+# diventa l'evento RECONCILED_DRIFT (nessun comando automatico). 0: niente persistenza né riconciliazione.
+persistenza = 1
+
+# Ogni quanti secondi si riconciliano i dispositivi veri (0 = solo all'avvio). Si può cambiare a caldo.
+intervallo_secondi = 300
+
+# ---------------------------------------------------------------------------
 # Segnali dei recettori
 # ---------------------------------------------------------------------------
 [segnali]
@@ -102,6 +136,20 @@ dispositivi_non_elencati = "rifiuta"
 #   valore_attivo  valore inviato quando un agente decide genericamente di "attivare" il dispositivo (default "ON")
 # I flag interni del sistema (REJECTED, RECONCILED_*, ...) non sono valori fisici e non vengono mai validati qui.
 # Una sezione senza valori né intervallo accetta qualsiasi valore per quel dispositivo.
+#
+# Dispositivo VERO (invece dell'effettore simulato in memoria): `adattatore = "http"` lo collega a un gateway HTTP
+# (Home Assistant, un bridge MQTT, il servizio del produttore). Il nome deve essere esatto, non un pattern. Dopo una
+# modifica degli adattatori riavvia l'app. Il contratto del gateway e gli altri protocolli: docs/DISPOSITIVI_REALI.md.
+#   url / url_comando  GET legge ({"value": ...}); POST comanda (url_comando, se manca url)
+#   token_env          nome della variabile di .env col token Bearer (mai il token qui)
+#   timeout_secondi    attesa massima per richiesta (predefinito 5)
+#   soglia_errori / pausa_secondi   interruttore di circuito del dispositivo (predefiniti 3 e 30)
+#   campo_valore       campo JSON col valore (predefinito "value")
+# [dispositivi.front_door_lock]
+# valori = ["LOCKED", "UNLOCKED"]
+# adattatore = "http"
+# url = "http://gateway.local:8080/devices/front_door_lock"
+# token_env = "GATEWAY_TOKEN"
 
 [dispositivi.ac_living_room]
 valori = ["OFF", "ON"]

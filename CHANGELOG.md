@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Production blockers (2026-11-16)
+
+Four known blockers addressed. Not yet proven on real hardware: the HTTP adapter is tested against a simulated transport only.
+
+- **Real devices.** `adapter = "http"` in `[effectors.<name>]` (`app/tools/adattatori.py`, `docs/DISPOSITIVI_REALI.md`): a `Reflex` that reads and
+  commands a device through an HTTP gateway, with a Bearer token from `.env`, `Idempotency-Key`, `X-Correlation-Id` and `traceparent`, a safe retry
+  (commands only when the request never left) and a circuit breaker per device. `DELETE /system/reset` no longer commands real devices.
+- **Physical state.** Table `device_state`: every successful command saves the last known state. At start-up and at intervals (`[physical_state]`)
+  simulated devices get their last value back and real ones are read and compared with the last command; a difference is the event
+  `RECONCILED_DRIFT` (never an automatic command). `POST /effectors/reconcile`.
+- **Metrics and tracing.** `GET /metrics` (Prometheus text, summed across processes), W3C `traceparent` in and out, alert rules in
+  `docs/monitoraggio/allarmi.yml`, guide in `docs/OSSERVABILITA.md`. No OpenTelemetry exporter.
+- **Model protection.** Circuit breaker per model (`CIRCUITO_APERTO`), budget per provider (`BUDGET_ESAURITO`: requests per hour, estimated tokens per day) and
+  timeout per model: `[llm.protection]`, `[llm.budget]`, `[llm.timeout_seconds]`. Still no silent fallback.
+- **Migrations.** Alembic (`migrations/`, `alembic.ini`, `docs/MIGRAZIONI.md`) replaces the automatic column adding. Baseline `0001` also adopts databases
+  created before Alembic; `0002` adds `device_state`. `LANGBRAIN_MIGRAZIONI=manual` migrates as a deploy step instead of at start-up. `azzera_database`
+  now also drops `alembic_version`.
+
 The framework is renamed after the human body so that the same core fits any domain, and a use case no longer touches the
 core: it plugs into the API as an extension. The old names keep working as aliases.
 

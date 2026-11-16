@@ -1,13 +1,17 @@
+import asyncio
 import logging
 import os
+import time
 import httpx
 import httpx2
 from anthropic import AsyncAnthropic
 from dotenv import dotenv_values, find_dotenv, load_dotenv
 from openai import AsyncOpenAI
 
+from app.core import metriche
 from app.core.configurazione import get_configurazione
 from app.core.errori_llm import ErroreLLM, classifica_errore
+from app.core.protezione_llm import protezione, stima_token
 
 # `LANGBRAIN_ENV_FILE` permette di indicare un file .env diverso da quello del progetto.
 _PERCORSO_ENV = os.getenv("LANGBRAIN_ENV_FILE") or find_dotenv()
@@ -69,7 +73,7 @@ def normalizza_provider(nome: str | None) -> str:
 # Errori che riguardano l'intero provider e non il singolo modello: provare altri modelli dello stesso provider
 # sarebbe inutile (e potrebbe costare), si passa direttamente al provider successivo.
 _ERRORI_DELL_INTERO_PROVIDER = {
-    "CHIAVE_NON_VALIDA", "CHIAVE_NON_CONFIGURATA", "CREDITI_ESAURITI", "PROVIDER_NON_RAGGIUNGIBILE",
+    "CHIAVE_NON_VALIDA", "CHIAVE_NON_CONFIGURATA", "CREDITI_ESAURITI", "PROVIDER_NON_RAGGIUNGIBILE", "BUDGET_ESAURITO",
 }
 
 
@@ -318,20 +322,55 @@ class Mao:
         if self.fallback:
             candidate_models += [m for m in p_cfg["fallback_models"] if m != target_model]
 
+        token_in = stima_token(system_prompt) + stima_token(user_prompt)
         ultimo_errore: ErroreLLM | None = None
         for m in candidate_models:
             try:
-                return await self._chiedi_modello(
+                protezione.controlla(provider_key, m)   # interruttore di circuito e budget: la chiamata può non partire
+            except ErroreLLM as respinta:
+                ultimo_errore = respinta
+                metriche.incrementa("langbrain_llm_calls_total", provider=provider_key, model=m, outcome=respinta.codice)
+                logger.warning(f"[MAO] [{provider_key}] Chiamata a '{m}' respinta: {respinta.messaggio}")
+                if respinta.codice in _ERRORI_DELL_INTERO_PROVIDER:
+                    break
+                continue
+            inizio = time.perf_counter()
+            try:
+                risposta = await self._chiedi_con_timeout(
                     client, provider_key, m, system_prompt, user_prompt, temperature,
                     max_tokens, enable_reasoning, rigenera_se_troncata,
                 )
+                protezione.successo(provider_key, m, token_in, stima_token(risposta))
+                self._misura_chiamata(provider_key, m, "ok", inizio)
+                return risposta
+            except asyncio.CancelledError:
+                protezione.annulla(provider_key, m)
+                raise
             except Exception as e:
                 ultimo_errore = self._come_errore_llm(e, provider_key, m)
+                protezione.errore(provider_key, m, ultimo_errore, token_in)
+                self._misura_chiamata(provider_key, m, ultimo_errore.codice, inizio)
                 logger.warning(f"[MAO] [{provider_key}] Errore con il modello '{m}': {ultimo_errore.messaggio}")
                 if ultimo_errore.codice in _ERRORI_DELL_INTERO_PROVIDER:
                     break
 
         raise ultimo_errore
+
+    @staticmethod
+    def _misura_chiamata(provider: str, modello: str, esito: str, inizio: float) -> None:
+        metriche.incrementa("langbrain_llm_calls_total", provider=provider, model=modello, outcome=esito)
+        metriche.osserva("langbrain_llm_call_duration_seconds", time.perf_counter() - inizio, provider=provider)
+
+    async def _chiedi_con_timeout(self, client, provider_key: str, modello: str, *argomenti) -> str:
+        """`_chiedi_modello` con il timeout del modello (`[llm.timeout_secondi]`), se la configurazione ne indica uno."""
+        attesa = protezione.timeout_per(provider_key, modello)
+        if not attesa:
+            return await self._chiedi_modello(client, provider_key, modello, *argomenti)
+        try:
+            return await asyncio.wait_for(self._chiedi_modello(client, provider_key, modello, *argomenti), timeout=attesa)
+        except asyncio.TimeoutError:
+            raise ErroreLLM("PROVIDER_NON_RAGGIUNGIBILE", f"Nessuna risposta dal modello '{modello}' entro {attesa:g} s (timeout configurato).",
+                            provider=provider_key, modello=modello) from None
 
     async def call_model(
         self,

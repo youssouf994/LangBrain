@@ -5,7 +5,7 @@ from sqlalchemy import delete, insert
 
 from app.core import archivio
 from app.core.configurazione import get_configurazione
-from app.db import schema
+from app.db import migrazioni, schema
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +27,9 @@ class Database:
 
         try:
             async with archivio.motore(self.db_path).begin() as db:
-                # 1-5. Tabelle (eventi / audit log, segnali, esecuzioni dei nodi, stato condiviso) e indici
-                await db.run_sync(archivio.crea_tabelle, schema.metadata)
-
-                # Auto-migrazione: aggiunta colonne mancanti se lo schema è obsoleto
-                await db.run_sync(archivio.aggiungi_colonne_mancanti, schema.metadata)
+                # 1-5. Schema (tabelle, colonne, indici): lo porta all'ultima revisione Alembic (`migrations/`,
+                # `docs/MIGRAZIONI.md`). Un database di prima di Alembic viene preso in carico dalla revisione 0001.
+                await db.run_sync(migrazioni.aggiorna_schema)
 
                 # 6. Conflitto dimostrativo: solo se richiesto da configurazione.toml ([demo] conflitto_all_avvio = 1).
                 # Di default il database non riceve dati di prova in automatico.

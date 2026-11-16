@@ -20,19 +20,21 @@ import time
 import asyncio
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
 from app.api.settings_routes import register_routes as register_settings_routes
 from app.agents.agent_registry import AgenteConFigliError, AgentRegistry, ErroreGerarchia
-from app.core import conservazione
+from app.core import conservazione, metriche, riconciliazione
 from app.core.avvio import verifica_avvio
 from app.core.contesto import MiddlewareContesto
+from app.core.metriche import MiddlewareMetriche
 from app.core.log_json import configura_log
-from app.core.salute import VERSIONE_NUCLEO
+from app.core import protezione_llm  # noqa: F401  (all'import registra il collettore delle metriche degli interruttori LLM)
+from app.core.salute import VERSIONE_NUCLEO, aggiorna_metriche_base, aggiorna_metriche_dispositivi
 from app.checkpointer import apri_checkpointer, chiudi_checkpointer, get_checkpointer, svuota_checkpoint
-from app.core import multiprocesso
+from app.core import multiprocesso, stato_fisico
 from app.core.configurazione import get_configurazione
 from app.core.errori_llm import ErroreLLM, oscura_segreti
 from app.core.estensioni import carica_estensioni
@@ -149,6 +151,21 @@ async def autentica_e_autorizza(request: Request, chiave: str | None = Security(
         raise _nega_per_ruolo(ruolo, richiesto)
 
 
+def _strumenti_correnti() -> dict:
+    """Tutti i tool noti al processo: quelli del grafo e quelli registrati (anche dai nodi installati)."""
+    from app.tools.effectors import tool_registrati
+    return {**tool_registrati(), **_shared_tools}
+
+
+async def _riconcilia_all_avvio() -> None:
+    """All'avvio rimette in memoria lo stato dei dispositivi simulati e confronta quello dei veri con l'ultimo noto (un processo alla volta)."""
+    try:
+        async with multiprocesso.blocco("riconciliazione_avvio"):
+            await riconciliazione.riconcilia(_strumenti_correnti(), avvio=True)
+    except Exception:
+        logger.exception("Riconciliazione all'avvio non riuscita: si prosegue senza.")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configura_log()  # LANGBRAIN_LOG_FORMAT=json: una riga JSON per evento, senza segreti
@@ -162,9 +179,13 @@ async def lifespan(app: FastAPI):
         await gestore_timer.assicura_tabella()
         await apri_checkpointer()
     await _recompile_system_graph(propaga=False)
+    await _riconcilia_all_avvio()
     installa_filtro_accessi()
     # Compiti in background: con più processi ciascuno gira in uno solo alla volta (multiprocesso.compito_leader).
     sorveglianza_timer = asyncio.create_task(multiprocesso.compito_leader("hitl_timer", gestore_timer.sorveglia))
+    pubblicazione_metriche = asyncio.create_task(metriche.sorveglia())   # ogni processo pubblica le proprie (no-op con un processo solo)
+    sorveglianza_stato_fisico = asyncio.create_task(multiprocesso.compito_leader(
+        "riconciliazione", lambda: riconciliazione.sorveglia(_strumenti_correnti)))
     conservazione_dati = asyncio.create_task(multiprocesso.compito_leader("conservazione", conservazione.sorveglia))
     # ...e quelli dei nodi installati (es. lettura di una casella di posta, scadenze proprie).
     compiti_estensioni = [asyncio.create_task(multiprocesso.compito_leader(f"{e.nome}.{compito.__name__}", compito))
@@ -172,7 +193,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        for compito in (sorveglianza_timer, conservazione_dati, *compiti_estensioni):
+        for compito in (sorveglianza_timer, conservazione_dati, pubblicazione_metriche, sorveglianza_stato_fisico, *compiti_estensioni):
             compito.cancel()
             try:
                 await compito
@@ -192,7 +213,10 @@ app = FastAPI(
     dependencies=[Depends(autentica_e_autorizza), Depends(sincronizza_stato)],
 )
 
-app.add_middleware(MiddlewareContesto)  # correlation id e attore (X-Correlation-Id, X-Actor) per ogni richiesta
+metriche.registra_collettore(aggiorna_metriche_base)
+metriche.registra_collettore(aggiorna_metriche_dispositivi)
+app.add_middleware(MiddlewareMetriche)  # contatori e durate delle richieste per `GET /metrics` (aggiunto prima: è il più interno)
+app.add_middleware(MiddlewareContesto)  # correlation id, attore e traccia (X-Correlation-Id, X-Actor, traceparent) per ogni richiesta
 register_settings_routes(app)
 for _estensione in carica_estensioni():  # rotte e pagine dei nodi installati (app/nodes)
     if _estensione.registra_rotte:
@@ -834,6 +858,15 @@ async def set_tool_endpoint(body: ToolWriteRequest):
     return {"device_id": body.target, "new_value": lettura.get("value", validazione.valore)}
 
 
+@app.post("/effectors/reconcile", tags=["Effectors"])
+async def reconcile_effectors():
+    """
+    Confronta ora l'ultimo stato noto dei dispositivi con ciò che dichiarano (vedi `app/core/riconciliazione.py`): legge, non comanda.
+    Una deriva (ultimo comando diverso dal valore letto) viene registrata come evento `RECONCILED_DRIFT`.
+    """
+    return {"devices": await riconciliazione.riconcilia(_strumenti_correnti(), avvio=False)}
+
+
 @app.post("/tools/{device_id}/fault", include_in_schema=False)  # nome storico di /effectors/{device_id}/fault
 @app.post("/effectors/{device_id}/fault", tags=["Effectors"])
 async def set_tool_fault(device_id: str, body: ToolFaultRequest):
@@ -1036,6 +1069,14 @@ async def macro_health_check():
     return {"result": messages[-1].content if messages else None}
 
 
+# --- Metriche ---
+
+@app.get("/metrics", tags=["System"])
+async def get_metrics():
+    """Metriche in formato Prometheus (richieste, modelli, dispositivi, grafo): vedi `docs/OSSERVABILITA.md`."""
+    return PlainTextResponse(await metriche.esporta(), media_type="text/plain; version=0.0.4; charset=utf-8")
+
+
 # --- System Reset Endpoint ---
 
 @app.delete("/system/reset", tags=["System"])
@@ -1054,6 +1095,7 @@ async def reset_system_state():
     async with archivio.motore(DB_PATH).begin() as db:
         for tabella in (schema.events, schema.signals, schema.node_runs, schema.readings, schema.agents_registry):
             await db.execute(delete(tabella))
+    await stato_fisico.assicura_e_svuota()
     await assicura_tabella_modelli()
     await gestore_timer.assicura_tabella()
     async with archivio.motore(DB_PATH).begin() as db:
@@ -1065,10 +1107,11 @@ async def reset_system_state():
     hitl_manager.update_config(hitl_all=False, hitl_nodes=[], hitl_targets=[], hitl_actions=[], max_wait_seconds=None)
     await hitl_manager.salva_condivisa()
 
-    # 3. Resetta lo stato dei tool IoT condivisi
+    # 3. Resetta lo stato dei tool simulati condivisi. I dispositivi veri non si toccano: un reset del database non deve
+    #    chiudere una serratura o spegnere una luce vera.
     async with _graph_lock:
         for name, tool in _shared_tools.items():
-            if hasattr(tool, "set_tool_value"):
+            if hasattr(tool, "set_tool_value") and getattr(tool, "simulato", True):
                 if "lock" in name:
                     await tool.set_tool_value("LOCKED")
                 elif "alarm" in name:

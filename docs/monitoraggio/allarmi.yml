@@ -1,0 +1,73 @@
+# Regole di allarme per Prometheus/Alertmanager (metriche di docs/OSSERVABILITA.md).
+# Soglie e durate sono un punto di partenza: adattale al tuo impianto.
+groups:
+  - name: langbrain
+    rules:
+      - alert: LangBrainNessunaMetrica
+        expr: absent(langbrain_workers) or langbrain_workers < 1
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "LangBrain non pubblica metriche (processo fermo o /metrics non raggiungibile)"
+
+      - alert: LangBrainDatabaseGiu
+        expr: langbrain_database_up == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "Il database di LangBrain non risponde"
+
+      - alert: LangBrainErrori5xx
+        expr: sum(rate(langbrain_http_requests_total{status=~"5.."}[5m])) / sum(rate(langbrain_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Oltre il 5% delle richieste HTTP finisce in errore 5xx"
+
+      - alert: LangBrainModelloSospeso
+        expr: langbrain_llm_circuit_state == 2
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "Modello {{ $labels.model }} ({{ $labels.provider }}) sospeso dall'interruttore di circuito"
+          description: "Troppi errori di fila: il grafo si ferma per l'operatore. Vedi docs/OSSERVABILITA.md."
+
+      - alert: LangBrainBudgetQuasiFinito
+        expr: langbrain_llm_budget_used_ratio > 0.8
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Budget {{ $labels.tipo }} del provider {{ $labels.provider }} oltre l'80%"
+
+      - alert: LangBrainChiamateLlmInErrore
+        expr: sum by (provider) (rate(langbrain_llm_calls_total{outcome!="ok"}[10m])) / sum by (provider) (rate(langbrain_llm_calls_total[10m])) > 0.3
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Oltre il 30% delle chiamate al provider {{ $labels.provider }} fallisce"
+
+      - alert: LangBrainDispositivoOffline
+        expr: langbrain_device_online == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Il dispositivo {{ $labels.device }} non risponde"
+
+      - alert: LangBrainDispositivoSospeso
+        expr: langbrain_device_circuit_state == 2
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "Interruttore di circuito aperto sul dispositivo {{ $labels.device }}"
+
+      - alert: LangBrainDerivaStatoFisico
+        expr: increase(langbrain_device_reconciliations_total{outcome="deriva"}[15m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "Un dispositivo non è nello stato comandato (evento RECONCILED_DRIFT nel registro)"
+
+      - alert: LangBrainNodiInErrore
+        expr: sum by (node) (increase(langbrain_graph_node_runs_total{outcome=~"error.*"}[15m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "Il nodo {{ $labels.node }} del grafo è andato in errore"

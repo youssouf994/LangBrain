@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, insert, literal, select, update
 
-from app.core import archivio, contesto
+from app.core import archivio, contesto, metriche
 from app.db import schema
 from app.db.database import DB_PATH
 
@@ -154,6 +154,8 @@ class NervousSystem:
         Traccia l'esecuzione di un nodo del grafo (`outcome`: ok, waiting, error, ...). Serve alle statistiche
         (`GET /graph/stats`): un errore qui viene registrato e NON rilanciato, la traccia non deve fermare il grafo.
         """
+        metriche.incrementa("langbrain_graph_node_runs_total", node=node, outcome=outcome[:40])
+        metriche.osserva("langbrain_graph_node_duration_seconds", max(duration_ms, 0.0) / 1000.0, node=node)
         try:
             async with self._motore().begin() as db:
                 await db.execute(insert(node_runs).values(

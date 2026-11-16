@@ -52,3 +52,11 @@ def pytest_runtest_setup(item):
 
 def pytest_sessionfinish(session, exitstatus):
     pg_isolamento.pulisci()
+
+
+def pytest_runtest_teardown(item):
+    """Lo stato globale di protezione LLM e metriche non deve passare da un test all'altro."""
+    from app.core import metriche
+    from app.core.protezione_llm import protezione
+    protezione.azzera()
+    metriche.azzera()
