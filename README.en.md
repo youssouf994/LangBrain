@@ -3,7 +3,7 @@
 # 🤖 LangBrain
 
 > [!WARNING]
-> **LangBrain is a working boilerplate, but it is not production-ready:** simulated devices (no real hardware adapter), no metrics or tracing, no WebSocket. Known limits and the roadmap are in [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md).
+> **LangBrain is a working boilerplate, not yet proven in production:** there is an HTTP adapter for real devices (never tried on a real gateway or hardware: a trial phase is needed), physical state is reconciled after a restart, and there are Prometheus metrics, `traceparent` propagation, model protection (circuit breaker, budget, timeout) and Alembic migrations. An OpenTelemetry exporter, MQTT and WebSocket are missing. Known limits and the roadmap are in [`docs/PROJECT_STATUS.en.md`](docs/PROJECT_STATUS.en.md).
 
 **A digital body for your intelligent automation and hierarchical-agent projects.**
 

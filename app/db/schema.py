@@ -175,3 +175,15 @@ hitl_scadenze = Table(
     Column("durata_secondi", Integer, nullable=False),
     Column("stato", Text, nullable=False, server_default=text("'attesa'")),
 )
+
+# Ultimo stato noto di ogni dispositivo (vedi `app/core/stato_fisico.py`): sopravvive ai riavvii e permette di riconciliare
+# ciò che il sistema credeva con ciò che il dispositivo dichiara. `source` è `commanded` (ultimo comando riuscito) oppure
+# `observed` (ultima lettura). Aggiunta dalla revisione Alembic 0002.
+device_state = Table(
+    "device_state", metadata,
+    Column("device_id", String(255), primary_key=True),
+    Column("value", Text),
+    Column("unit", Text),
+    Column("source", Text, nullable=False, server_default=text("'observed'")),
+    Column("updated_at", DateTime, default=adesso_utc, server_default=func.current_timestamp()),
+)

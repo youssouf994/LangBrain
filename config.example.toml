@@ -29,6 +29,27 @@ openrouter = ["google/gemma-4-31b-it:free", "nvidia/nemotron-3-super-120b-a12b:f
 mistral = ["ministral-3b-latest"]
 google_studio = ["gemini-flash-latest"]
 
+# Model protection (circuit breaker): after `error_threshold` consecutive errors of a model (provider unreachable, provider
+# error, rate limit, credits, key) calls to that model are refused at once with CIRCUITO_APERTO for `pause_seconds`; then
+# one trial call decides whether to reopen. Errors of a single request (truncated answer, context exceeded) do not open it.
+# See docs/OSSERVABILITA.md.
+[llm.protection]
+error_threshold = 5
+pause_seconds = 60
+
+# Longest time of one attempt, per provider or per "provider/model". With no entry MAO_TIMEOUT_SECONDS applies.
+# [llm.timeout_seconds]
+# mistral = 20
+
+# Budget per provider (0 or missing = no limit): requests in the last hour and ESTIMATED tokens (4 characters each) of the
+# UTC day. Once used up, the call is refused with BUDGET_ESAURITO and the graph stops for the operator. With several
+# processes (python -m app.serve) the limit is split between them. Entries under [llm.budget] apply to every provider;
+# [llm.budget.<provider>] replaces them for that provider.
+# [llm.budget]
+# requests_per_hour = 600
+# [llm.budget.openrouter]
+# tokens_per_day = 200000
+
 # ---------------------------------------------------------------------------
 # Human-in-the-loop: operator timer
 # ---------------------------------------------------------------------------
@@ -73,6 +94,18 @@ seed_conflict_at_start = 0
 web_page = 1
 
 # ---------------------------------------------------------------------------
+# Physical state of the devices
+# ---------------------------------------------------------------------------
+[physical_state]
+# 1: every successful command saves the last known state of the device (table device_state). At start-up a simulated device
+# gets its last value back; a real one is read and compared with the last command: a difference is a "drift" and becomes the
+# event RECONCILED_DRIFT (no automatic command). 0: no persistence and no reconciliation.
+persistence = 1
+
+# How often (seconds) real devices are reconciled (0 = at start-up only). Can be changed without a restart.
+interval_seconds = 300
+
+# ---------------------------------------------------------------------------
 # Receptor signals
 # ---------------------------------------------------------------------------
 [signals]
@@ -97,6 +130,20 @@ unlisted_devices = "reject"
 #   active_value  value sent when an agent generically decides to "activate" the device (default "ON")
 # Internal flags of the system (REJECTED, RECONCILED_*, ...) are not physical values and are never validated here.
 # A section with neither values nor range accepts any value for that device.
+#
+# REAL device (instead of the simulated in-memory effector): `adapter = "http"` connects it to an HTTP gateway (Home
+# Assistant, an MQTT bridge, the manufacturer's service). The name must be exact, not a pattern. Restart the app after
+# changing adapters. The gateway contract and other protocols: docs/DISPOSITIVI_REALI.md.
+#   url / command_url  GET reads ({"value": ...}); POST commands (command_url, or url if missing)
+#   token_env          name of the .env variable holding the Bearer token (never the token here)
+#   timeout_seconds    longest wait per request (default 5)
+#   error_threshold / pause_seconds   circuit breaker of the device (defaults 3 and 30)
+#   value_field        JSON field holding the value (default "value")
+# [effectors.front_door_lock]
+# values = ["LOCKED", "UNLOCKED"]
+# adapter = "http"
+# url = "http://gateway.local:8080/devices/front_door_lock"
+# token_env = "GATEWAY_TOKEN"
 
 [effectors.ac_living_room]
 values = ["OFF", "ON"]

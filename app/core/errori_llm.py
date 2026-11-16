@@ -47,6 +47,8 @@ SUGGERIMENTI = {
     "RISPOSTA_NON_UTILIZZABILE": "Il modello ha dichiarato di non poter rispondere: verifica il contesto fornito o cambia modello.",
     "PROVIDER_NON_RAGGIUNGIBILE": "Il provider non risponde: verifica la rete, l'URL configurato e lo stato del servizio.",
     "ERRORE_PROVIDER": "Errore interno del provider: riprova più tardi o cambia provider.",
+    "CIRCUITO_APERTO": "Il modello ha dato troppi errori di fila ed è sospeso: attendi la pausa indicata, oppure scegli un altro modello o provider (soglia e pausa in [llm.protezione]).",
+    "BUDGET_ESAURITO": "Il budget configurato per il provider è finito: attendi che si liberi la finestra (ora o giorno) oppure alza il limite in [llm.budget].",
     "PROVIDER_NON_SUPPORTATO": "Provider non riconosciuto: correggi DEFAULT_PROVIDER nel file .env.",
     "ERRORE_IMPREVISTO": "Errore imprevisto nella chiamata al modello: controlla i log del server.",
 }
@@ -63,6 +65,8 @@ SUGGERIMENTI_EN = {
     "RISPOSTA_NON_UTILIZZABILE": "The model declared it cannot answer: check the context given or change model.",
     "PROVIDER_NON_RAGGIUNGIBILE": "The provider does not answer: check the network, the configured URL and the service status.",
     "ERRORE_PROVIDER": "Internal error of the provider: try again later or change provider.",
+    "CIRCUITO_APERTO": "The model failed too many times in a row and is suspended: wait for the pause shown, or choose another model or provider (threshold and pause in [llm.protection]).",
+    "BUDGET_ESAURITO": "The budget configured for the provider is used up: wait for the window (hour or day) to free up or raise the limit in [llm.budget].",
     "PROVIDER_NON_SUPPORTATO": "Provider not recognised: fix DEFAULT_PROVIDER in the .env file.",
     "ERRORE_IMPREVISTO": "Unexpected error calling the model: check the server logs.",
 }

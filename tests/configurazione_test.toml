@@ -4,3 +4,8 @@ fallback = false
 
 [politica]
 dispositivi_non_elencati = "consenti"
+
+# La persistenza dello stato fisico resta spenta nei test: i comandi di un test non devono riapparire come stato dei dispositivi
+# simulati nell avvio dell app di un altro. I test dello stato fisico la accendono da soli (imposta_configurazione).
+[stato_fisico]
+persistenza = 0

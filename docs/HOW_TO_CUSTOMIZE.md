@@ -628,6 +628,12 @@ class MyCustomAgent(BaseAgent):
 
 ## 4. Creare e Registrare Nuovi Tool IoT
 
+> **Dispositivo vero senza scrivere codice:** per un gateway HTTP basta `adattatore = "http"` nella sezione del dispositivo in `configurazione.toml`
+> ([`DISPOSITIVI_REALI.md`](DISPOSITIVI_REALI.md)). Per un altro protocollo si scrive una sottoclasse come qui sotto, con `simulato = False`: il suo stato
+> viene salvato a ogni comando e riconciliato dopo il riavvio. Rotte collegate: `GET /metrics` (ruolo `tirocinante`, [`OSSERVABILITA.md`](OSSERVABILITA.md)) e
+> `POST /effectors/reconcile` (ruolo `medico_di_guardia`: legge i dispositivi, confronta con l'ultimo comando e registra una `RECONCILED_DRIFT` se differiscono).
+> Lo schema del database cambia solo con le migrazioni ([`MIGRAZIONI.md`](MIGRAZIONI.md)).
+
 Tutti i tool ereditano da `BaseTool`:
 
 ```python

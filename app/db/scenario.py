@@ -30,7 +30,7 @@ from pathlib import Path
 from sqlalchemy import delete, func, insert, select, text
 
 from app.agents.agent_registry import AgentRegistry
-from app.core import archivio
+from app.core import archivio, stato_fisico
 from app.core.modelli_agenti import assicura_tabella as assicura_tabella_modelli, imposta_modello
 from app.db import schema
 from app.db.database import Database
@@ -39,7 +39,9 @@ from app.MAO.model_access_object import PROVIDER_NOTI, normalizza_provider
 
 logger = logging.getLogger(__name__)
 
-TABELLE_DA_SVUOTARE = ("events", "signals", "readings", "node_runs", "agents_registry", "agent_models", "hitl_scadenze", "checkpoints", "writes")
+# `alembic_version` va eliminata con le altre: se restasse, Alembic crederebbe lo schema già aggiornato e non ricreerebbe le tabelle.
+TABELLE_DA_SVUOTARE = ("events", "signals", "readings", "node_runs", "agents_registry", "agent_models", "hitl_scadenze", "device_state",
+                       "checkpoints", "writes", "alembic_version")
 
 # (nome, padre, target, peso, prompt)
 AGENTI_BASE = [
@@ -79,6 +81,7 @@ async def azzera_database(db_path: str) -> None:
                 continue  # su Postgres le tabelle del checkpointer hanno altri nomi e le gestisce LangGraph
             # Nomi fissi della nostra lista (non input esterno); l'identificatore è comunque quotato dal dialetto.
             await db.execute(text(f"DROP TABLE IF EXISTS {db.dialect.identifier_preparer.quote(tabella)}"))
+    stato_fisico.dimentica_cache()   # la tabella `device_state` non c'è più: la prossima scrittura la ricrea
 
 
 def crea_backup(db_path: str) -> Path | None:

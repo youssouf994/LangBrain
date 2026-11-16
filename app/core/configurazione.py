@@ -68,6 +68,9 @@ class RegolaDispositivo:
     intervallo: tuple[float, float] | None = None
     unita: str = ""
     valore_attivo: str | None = None
+    adattatore: str | None = None
+    """Come si parla col dispositivo vero (`"http"`); None: effettore simulato in memoria."""
+    opzioni_adattatore: dict[str, Any] = field(default_factory=dict, compare=False, hash=False)
 
     @property
     def senza_vincoli(self) -> bool:
@@ -122,6 +125,12 @@ class Configurazione:
     demo_pagina_web: bool = True
     finestra_segnali_ore: float = FINESTRA_SEGNALI_ORE_PREDEFINITA   # `[segnali] finestra_ore`: quanto indietro arrivano i segnali nello stato
     prompt: dict[str, str] = field(default_factory=dict)
+    llm_soglia_errori: int = 5            # `[llm.protezione]`: errori di fila che aprono l'interruttore di un modello
+    llm_pausa_secondi: float = 60.0       # ...e per quanto resta aperto
+    llm_timeout: dict[str, float] = field(default_factory=dict)   # `[llm.timeout_secondi]`: per provider o "provider/modello"
+    llm_budget: dict[str, dict[str, int]] = field(default_factory=dict)   # `[llm.budget]`: "*" e per provider; 0 = nessun limite
+    stato_fisico_persistenza: bool = True          # `[stato_fisico] persistenza`
+    stato_fisico_intervallo_secondi: float = 300.0   # `[stato_fisico] intervallo_secondi`: 0 = solo all'avvio
     lingua: str = "it"     # lingua dei prompt predefiniti, dei messaggi dell'API e delle pagine (it, en)
     attori_esterni: dict[str, AttoreEsterno] = field(default_factory=dict)
 
@@ -202,14 +211,100 @@ def _regola_da_dati(nome: str, dati: Any) -> RegolaDispositivo:
         ):
             raise ErroreConfigurazione(f"[dispositivi.{nome}] 'intervallo' deve essere [minimo, massimo] numerico.")
         intervallo = (float(intervallo[0]), float(intervallo[1]))
+    adattatore, opzioni = _adattatore_da_dati(nome, dati)
     regola = RegolaDispositivo(
         nome=nome,
         valori=tuple(valori),
         intervallo=intervallo,
         unita=str(dati.get("unita", "")),
         valore_attivo=dati.get("valore_attivo"),
+        adattatore=adattatore,
+        opzioni_adattatore=opzioni,
     )
     return regola
+
+
+ADATTATORI_NOTI = ("http",)
+
+
+def _adattatore_da_dati(nome: str, dati: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+    """`adattatore` e le sue opzioni da `[dispositivi.nome]`: None se il dispositivo è simulato."""
+    adattatore = dati.get("adattatore")
+    if adattatore is None:
+        return None, {}
+    dove = f"[dispositivi.{nome}]"
+    if adattatore not in ADATTATORI_NOTI:
+        raise ErroreConfigurazione(f"{dove} 'adattatore' deve essere uno tra {', '.join(ADATTATORI_NOTI)}.")
+    if any(c in nome for c in "*?["):
+        raise ErroreConfigurazione(f"{dove} un adattatore vale per un dispositivo solo: il nome non può essere un pattern.")
+    opzioni: dict[str, Any] = {}
+    for chiave in ("url", "url_comando"):
+        valore = dati.get(chiave)
+        if valore is None:
+            continue
+        if not isinstance(valore, str) or not valore.startswith(("http://", "https://")):
+            raise ErroreConfigurazione(f"{dove} '{chiave}' deve essere un indirizzo http:// o https://.")
+        opzioni[chiave] = valore
+    if "url" not in opzioni:
+        raise ErroreConfigurazione(f"{dove} con l'adattatore \"{adattatore}\" serve 'url'.")
+    for chiave in ("token_env", "campo_valore"):
+        valore = dati.get(chiave)
+        if valore is not None:
+            if not isinstance(valore, str) or not valore.strip():
+                raise ErroreConfigurazione(f"{dove} '{chiave}' deve essere un testo non vuoto.")
+            opzioni[chiave] = valore.strip()
+    timeout = dati.get("timeout_secondi")
+    if timeout is not None:
+        if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or not 0 < timeout <= 120:
+            raise ErroreConfigurazione(f"{dove} 'timeout_secondi' deve essere un numero maggiore di zero e al massimo 120.")
+        opzioni["timeout_secondi"] = float(timeout)
+    soglia = dati.get("soglia_errori")
+    if soglia is not None:
+        if not isinstance(soglia, int) or isinstance(soglia, bool) or soglia < 1:
+            raise ErroreConfigurazione(f"{dove} 'soglia_errori' deve essere un intero maggiore o uguale a 1.")
+        opzioni["soglia_errori"] = soglia
+    pausa = dati.get("pausa_secondi")
+    if pausa is not None:
+        if not isinstance(pausa, (int, float)) or isinstance(pausa, bool) or pausa <= 0:
+            raise ErroreConfigurazione(f"{dove} 'pausa_secondi' deve essere un numero maggiore di zero.")
+        opzioni["pausa_secondi"] = float(pausa)
+    return adattatore, opzioni
+
+
+def _numero(dove: str, nome: str, valore: Any, intero: bool = False, consenti_zero: bool = False):
+    minimo_ok = (lambda v: v >= 0) if consenti_zero else (lambda v: v > 0)
+    tipo_ok = isinstance(valore, int) if intero else isinstance(valore, (int, float))
+    if not tipo_ok or isinstance(valore, bool) or not minimo_ok(valore):
+        qual = "un intero" if intero else "un numero"
+        limite = "maggiore o uguale a zero" if consenti_zero else "maggiore di zero"
+        raise ErroreConfigurazione(f"{dove} '{nome}' deve essere {qual} {limite}.")
+    return valore
+
+
+def _protezione_llm_da_dati(llm: dict[str, Any]) -> tuple[int, float, dict[str, float], dict[str, dict[str, int]]]:
+    """Soglia e pausa dell'interruttore, timeout per provider/modello e budget da `[llm.*]`."""
+    protezione = llm.get("protezione", {})
+    if not isinstance(protezione, dict):
+        raise ErroreConfigurazione("[llm.protezione] deve essere una sezione.")
+    soglia = int(_numero("[llm.protezione]", "soglia_errori", protezione.get("soglia_errori", 5), intero=True))
+    pausa = float(_numero("[llm.protezione]", "pausa_secondi", protezione.get("pausa_secondi", 60)))
+    timeout_grezzo = llm.get("timeout_secondi", {})
+    if not isinstance(timeout_grezzo, dict):
+        raise ErroreConfigurazione("[llm.timeout_secondi] deve contenere una voce per provider (o \"provider/modello\").")
+    timeout = {str(k): float(_numero("[llm.timeout_secondi]", str(k), v)) for k, v in timeout_grezzo.items()}
+    budget_grezzo = llm.get("budget", {})
+    if not isinstance(budget_grezzo, dict):
+        raise ErroreConfigurazione("[llm.budget] deve essere una sezione.")
+    budget: dict[str, dict[str, int]] = {}
+    voci = {"*": {k: v for k, v in budget_grezzo.items() if not isinstance(v, dict)},
+            **{k: v for k, v in budget_grezzo.items() if isinstance(v, dict)}}
+    for provider, limiti in voci.items():
+        dove = "[llm.budget]" if provider == "*" else f"[llm.budget.{provider}]"
+        ignote = set(limiti) - {"richieste_ora", "token_giorno"}
+        if ignote:
+            raise ErroreConfigurazione(f"{dove} voci sconosciute: {', '.join(sorted(ignote))} (ammesse: richieste_ora, token_giorno).")
+        budget[provider] = {k: int(_numero(dove, k, v, intero=True, consenti_zero=True)) for k, v in limiti.items()}
+    return soglia, pausa, timeout, budget
 
 
 def _interruttore(sezione: str, nome: str, valore: Any) -> bool:
@@ -226,10 +321,12 @@ def _interruttore(sezione: str, nome: str, valore: Any) -> bool:
 # usano gli italiani; `[effectors.*]` è il nome del corpo umano di `[devices.*]` / `[dispositivi.*]`. Un file che usa entrambi i nomi per la stessa voce è rifiutato.
 LINGUE = ("it", "en")
 _SEZIONI_EN = {"general": "generale", "policy": "politica", "devices": "dispositivi", "effectors": "dispositivi", "prompts": "prompt",
-               "organism": "organismo", "signals": "segnali"}
+               "organism": "organismo", "signals": "segnali", "physical_state": "stato_fisico"}
 _CHIAVI_EN = {
     "generale": {"language": "lingua"},
-    "llm": {"provider_order": "ordine_provider", "fallback_models": "modelli_di_ripiego"},
+    "llm": {"provider_order": "ordine_provider", "fallback_models": "modelli_di_ripiego", "protection": "protezione",
+            "timeout_seconds": "timeout_secondi"},
+    "stato_fisico": {"persistence": "persistenza", "interval_seconds": "intervallo_secondi"},
     "hitl": {"timer_enabled": "timer_attivo", "default_timer_seconds": "timer_predefinito_secondi",
              "on_timeout": "azione_alla_scadenza", "level": "livello", "brain_critical_targets": "target_critici_brain"},
     "demo": {"seed_conflict_at_start": "conflitto_all_avvio", "web_page": "pagina_web"},
@@ -238,7 +335,12 @@ _CHIAVI_EN = {
     "organismo": {"external_actors": "attori_esterni"},
     "prompt": {"brain_escalation_user": "brain_escalation_utente", "routine_check": "controllo_macro"},  # + alias delle estensioni
 }
-_CHIAVI_DISPOSITIVO_EN = {"values": "valori", "range": "intervallo", "unit": "unita", "active_value": "valore_attivo"}
+_CHIAVI_DISPOSITIVO_EN = {"values": "valori", "range": "intervallo", "unit": "unita", "active_value": "valore_attivo",
+                          "adapter": "adattatore", "command_url": "url_comando",
+                          "timeout_seconds": "timeout_secondi", "value_field": "campo_valore",
+                          "error_threshold": "soglia_errori", "pause_seconds": "pausa_secondi"}
+_CHIAVI_PROTEZIONE_EN = {"error_threshold": "soglia_errori", "pause_seconds": "pausa_secondi"}
+_CHIAVI_BUDGET_EN = {"requests_per_hour": "richieste_ora", "tokens_per_day": "token_giorno"}
 _CHIAVI_ATTORE_EN = {"level": "livello", "priority": "priorita", "description": "descrizione"}
 _VALORI_EN = {
     ("hitl", "azione_alla_scadenza"): {"human": "umano", "system": "sistema", "reject": "respingi"},
@@ -267,6 +369,15 @@ def normalizza_nomi(dati: dict[str, Any]) -> dict[str, Any]:
             nomi = {**nomi, **{k: v for e in estensioni() for k, v in e.alias_prompt.items()}}
         if isinstance(dati.get(sezione), dict):
             dati[sezione] = _rinomina(dati[sezione], nomi, f"[{sezione}]")
+    llm_sez = dati.get("llm")
+    if isinstance(llm_sez, dict):
+        if isinstance(llm_sez.get("protezione"), dict):
+            llm_sez["protezione"] = _rinomina(llm_sez["protezione"], _CHIAVI_PROTEZIONE_EN, "[llm.protezione]")
+        budget = llm_sez.get("budget")
+        if isinstance(budget, dict):
+            budget = _rinomina(budget, _CHIAVI_BUDGET_EN, "[llm.budget]")
+            llm_sez["budget"] = {k: (_rinomina(v, _CHIAVI_BUDGET_EN, f"[llm.budget.{k}]") if isinstance(v, dict) else v)
+                                 for k, v in budget.items()}
     for (sezione, chiave), valori in _VALORI_EN.items():
         valore = dati.get(sezione, {}).get(chiave) if isinstance(dati.get(sezione), dict) else None
         if isinstance(valore, str) and valore in valori:
@@ -371,7 +482,19 @@ def costruisci_configurazione(dati: dict[str, Any]) -> Configurazione:
     if not isinstance(finestra, (int, float)) or isinstance(finestra, bool) or not 0 < finestra <= 24 * 90:
         raise ErroreConfigurazione("[segnali] 'finestra_ore' deve essere un numero maggiore di zero e al massimo 2160 (90 giorni).")
 
+    soglia_llm, pausa_llm, timeout_llm, budget_llm = _protezione_llm_da_dati(llm)
+    stato_fisico = _sezione(dati, "stato_fisico")
+    intervallo_stato = stato_fisico.get("intervallo_secondi", 300)
+    if not isinstance(intervallo_stato, (int, float)) or isinstance(intervallo_stato, bool) or intervallo_stato < 0:
+        raise ErroreConfigurazione("[stato_fisico] 'intervallo_secondi' deve essere un numero maggiore o uguale a zero (0: solo all'avvio).")
+
     configurazione = Configurazione(
+        llm_soglia_errori=soglia_llm,
+        llm_pausa_secondi=pausa_llm,
+        llm_timeout=timeout_llm,
+        llm_budget=budget_llm,
+        stato_fisico_persistenza=_interruttore("stato_fisico", "persistenza", stato_fisico.get("persistenza", 1)),
+        stato_fisico_intervallo_secondi=float(intervallo_stato),
         finestra_segnali_ore=float(finestra),
         hitl_timer_attivo=_interruttore("hitl", "timer_attivo", hitl.get("timer_attivo", 0)),
         hitl_timer_secondi=durata,

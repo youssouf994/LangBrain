@@ -2,11 +2,11 @@
 
 🇮🇹 Italiano | 🇬🇧 [English](PROJECT_STATUS.en.md)
 
-Aggiornato il 2026-10-16. La versione precedente di questo documento era un audit statico con l'elenco dei difetti trovati; quei difetti sono stati corretti (la cronologia Git conserva l'audit originale) e qui resta lo stato attuale, i limiti noti e la roadmap.
+Aggiornato il 2026-11-16. La versione precedente di questo documento era un audit statico con l'elenco dei difetti trovati; quei difetti sono stati corretti (la cronologia Git conserva l'audit originale) e qui resta lo stato attuale, i limiti noti e la roadmap.
 
 ## Sintesi
 
-LangBrain è un boilerplate funzionante per sistemi di agenti gerarchici su LangGraph, con un dominio dimostrativo (smart home) e uno di prova (omeostasi medica), nominato con il vocabolario del corpo (Brain → Organ → Tissue → Cell; `Reflex`, `Receptor`, `Effector`, `NervousSystem`) e capace di ospitare nodi come estensioni (`app/nodes`). Il ciclo completo Brain → organi → tessuti → cellule, le escalation, l'approvazione dell'operatore, l'API, la persistenza su SQLite o Postgres, la sicurezza di base e la documentazione sono in ordine e coperti da test. **Non è pronto per la produzione**: gira con un solo worker per impostazione predefinita (più worker con `python -m app.serve`), gli effettori sono simulati e il loro stato fisico non è riconciliato dopo un riavvio, mancano metriche e tracing. I limiti sono elencati sotto.
+LangBrain è un boilerplate funzionante per sistemi di agenti gerarchici su LangGraph, con un dominio dimostrativo (smart home) e uno di prova (omeostasi medica), nominato con il vocabolario del corpo (Brain → Organ → Tissue → Cell; `Reflex`, `Receptor`, `Effector`, `NervousSystem`) e capace di ospitare nodi come estensioni (`app/nodes`). Il ciclo completo Brain → organi → tessuti → cellule, le escalation, l'approvazione dell'operatore, l'API, la persistenza su SQLite o Postgres, la sicurezza di base e la documentazione sono in ordine e coperti da test. **Non è ancora provato in produzione**: i quattro blocchi tecnici noti (adattatore per dispositivi veri, stato fisico riconciliato dopo il riavvio, metriche e tracciamento con protezione dei modelli, migrazioni versionate) sono stati realizzati e coperti da test, ma **l'adattatore HTTP non è mai stato provato su un gateway o su hardware veri**: i test lo provano contro un trasporto simulato. Prima di una produzione serve una fase di prova con i propri dispositivi. I limiti sono elencati sotto.
 
 ## Cosa c'è ed è verificato
 
@@ -29,18 +29,23 @@ LangBrain è un boilerplate funzionante per sistemi di agenti gerarchici su Lang
 | Dipendenze | Versioni esatte in `requirements.txt`, elenco completo in `requirements.lock`; `pip-audit` non trova vulnerabilità note. |
 | Test | `python -m pytest tests`: database temporanei, nessun LLM reale, i database veri non vengono mai toccati. `python -m pytest tests_windows` (2026-10-16): 649 passati, 10 saltati, 0 falliti. Prove per mutazione sui punti critici; prove reali con Mistral/OpenRouter/Gemini eseguite a mano durante lo sviluppo. |
 | CI e sicurezza | `.github/workflows/ci.yml`, verde su GitHub su `main` (commit `a9cccc2`, tag `poc-contratto-1.0.4-rc2`): test SQLite su Python 3.12 e 3.14, intera suite su Postgres 16 (`tests/pg_isolamento.py`), **build dell'immagine Docker con avvio** e rifiuto dell'avvio senza chiave, gitleaks e pip-audit (`scripts/scansione_sicurezza.sh`). Il job `conformita` (suite del contratto) è disabilitato: vive nel fork di HQ. Più `SECURITY.md`, `CONTRIBUTING.md`. |
+| Dispositivi reali | `adattatore = "http"` in `[dispositivi.<nome>]` ([`DISPOSITIVI_REALI.md`](DISPOSITIVI_REALI.md)): un gateway HTTP legge e comanda il dispositivo, con token da `.env`, `Idempotency-Key`, `traceparent`, nuovo tentativo sicuro e interruttore di circuito per dispositivo. Provato con un trasporto simulato (`tests/test_adattatori.py`), **non con un gateway o un hardware veri**. Altri protocolli: sottoclasse di `Reflex`. |
+| Stato fisico | Ogni comando riuscito salva l'ultimo stato (`device_state`); all'avvio e a intervalli (`[stato_fisico]`) i dispositivi simulati ritrovano l'ultimo valore e quelli veri sono riletti e confrontati con l'ultimo comando: la differenza è l'evento `RECONCILED_DRIFT`, mai un comando automatico (`app/core/riconciliazione.py`). `POST /effectors/reconcile`. `DELETE /system/reset` non comanda i dispositivi veri. |
+| Metriche e traccia | `GET /metrics` in formato Prometheus (richieste, modelli, dispositivi, grafo, database; somma dei processi con `app.serve`), propagazione W3C `traceparent` in ingresso e verso i dispositivi, regole di allarme pronte ([`OSSERVABILITA.md`](OSSERVABILITA.md)). |
+| Protezione dei modelli | Interruttore di circuito per modello, budget per provider (richieste/ora e token/giorno stimati) e timeout per modello (`[llm.protezione]`, `[llm.budget]`, `[llm.timeout_secondi]`): errori `CIRCUITO_APERTO` e `BUDGET_ESAURITO`, senza ripiego silenzioso. |
+| Migrazioni | Alembic (`migrations/`, `alembic.ini`, [`MIGRAZIONI.md`](MIGRAZIONI.md)): baseline 0001 che prende in carico anche i database di prima, revisione 0002 per `device_state`, `LANGBRAIN_MIGRAZIONI=manuale` per migrare come passo del deploy, test che fallisce se `schema.py` e le revisioni divergono. |
 | Docker | `Dockerfile` e `docker-compose.yml` (volume SQLite o `LANGBRAIN_DB_BACKEND`/`LANGBRAIN_DB_URL` per Postgres, health check, `python -m app.serve` con `LANGBRAIN_WORKERS` worker). L'immagine è stata costruita e provata (2026-10-15) con 3 worker contro Postgres: avvio, agenti, modelli, eventi, statistiche, HITL, checkpoint, riavvio e reset funzionano. |
 
 ## Limiti noti
 
 - **Più worker condividono lo stato nel database (SQLite o Postgres)** (`python -m app.serve`, `app/core/multiprocesso.py`): compiti in background in un processo alla volta, configurazione HITL a runtime, valori degli effettori simulati, interruttori dei tool e grafo compilato condivisi. Non condivisi: i guasti simulati e l'unico thread `api_session` del grafo dimostrativo (le esecuzioni si mettono in fila). `python -m uvicorn` resta un processo solo.
-- **Stato fisico dei tool in memoria**, non riconciliato con il DB al riavvio; i tool sono simulati (nessun adapter hardware, MQTT o webhook).
+- **Dispositivi veri**: un solo adattatore incluso (HTTP verso un gateway), mai provato su hardware o gateway reali. MQTT, Modbus e altri sono sottoclassi di `Reflex` da scrivere. La riconciliazione segnala la deriva, non la corregge (voluto). Con più processi i dispositivi veri non hanno un valore condiviso nel database: ogni lettura va al dispositivo. Una modifica degli adattatori in `configurazione.toml` richiede il riavvio.
 - **Segnali**: i valori numerici dei segnali finiscono nella tabella `signals` (`NervousSystem.record_signals`) e `reduce_readings` scarta quelli oltre la finestra (`[signals] window_hours`, 4 ore). La tabella `readings` è un residuo del nome vecchio: resta nello schema ma non viene né scritta né letta (la svuota solo `DELETE /system/reset`), e la chiave `readings` dello stato del grafo mantiene il nome storico.
 - **Registro eventi**: timestamp al millisecondo generati dall'applicazione (campo `ts` in ISO 8601 UTC) e ordine garantito dall'`event_id` crescente; ogni decisione porta `correlation_id`, `outcome`, `command_id`, `approval_id`. Gli errori DB in `mark_resolved`, `unblock_target` e TTL vengono rilanciati: `/events/unblock` e `/events/reset-conflicts` rispondono 503 senza toccare il dispositivo, il Brain completa il ciclo e avvisa l'operatore che l'escalation è rimasta aperta.
 - **Provider gratuiti**: i modelli gratuiti hanno limiti di richieste e crediti; quando finiscono il grafo si ferma per l'operatore (comportamento voluto), oppure si abilita il ripiego in `configurazione.toml`.
-- **Observability**: correlation id e attore per richiesta (`X-Correlation-Id`, `X-Actor`, `app/core/contesto.py`) e log JSON opzionale (`LANGBRAIN_LOG_FORMAT=json`, senza segreti). Nessuna metrica o trace. Nessun WebSocket (lo streaming è a Server-Sent Events).
+- **Observability**: correlation id e attore per richiesta (`X-Correlation-Id`, `X-Actor`, `app/core/contesto.py`), propagazione `traceparent` e log JSON opzionale (`LANGBRAIN_LOG_FORMAT=json`, senza segreti); metriche Prometheus su `GET /metrics`. **Nessun esportatore OpenTelemetry né span interni ai nodi**, nessun WebSocket (lo streaming è a Server-Sent Events). Interruttori e budget dei modelli sono in memoria del processo (il budget si divide per i processi); i token del budget sono stimati.
 - **Lingue**: gli errori di validazione della configurazione e i log sono in italiano.
-- **Test ancora assenti**: carico; timer HITL con scadenza reale su Postgres.
+- **Test ancora assenti**: carico; timer HITL con scadenza reale su Postgres; adattatore HTTP contro un gateway vero. Migrazioni e codice nuovo sono stati provati in locale su SQLite: la suite su Postgres gira solo in CI.
 - **Timeout a intermittenza della suite su Postgres, solo in locale con Docker Desktop (Windows)**: se il container dei test raggiunge Postgres
   passando dalla porta pubblicata sull'host (`host.docker.internal:55433`), qualche test (visti: `test_modelli_agenti`, `test_timer_hitl`,
   `test_validazione_gerarchia`) resta fermo 60 s e fallisce con `TimeoutError`: è il timeout di connessione predefinito di asyncpg, e la
@@ -89,11 +94,12 @@ Le dipendenze sono fissate (2026-09-20):
 
 - [ ] WebSocket (oltre allo streaming SSE già presente).
 - [x] Backend Postgres (`LANGBRAIN_DB_BACKEND=postgres` + `LANGBRAIN_DB_URL`, SQLAlchemy Core, interruttore e rollback in [`ROLLBACK.md`](ROLLBACK.md), suite eseguita anche su Postgres in CI).
-- [ ] Migrazioni versionate (Alembic è nelle dipendenze ma non ancora usato: oggi le colonne mancanti si aggiungono in automatico).
-- [ ] MQTT/webhook reali al posto del produttore di eventi simulato.
-- [ ] Budget, timeout e circuit breaker per modello.
-- [x] Correlation id e log JSON; [ ] tracing distribuito e metriche.
-- [ ] Persistenza dello stato fisico dei tool e adapter hardware.
+- [x] Migrazioni versionate (Alembic: [`MIGRAZIONI.md`](MIGRAZIONI.md)).
+- [x] Adattatore HTTP per dispositivi reali; [ ] MQTT e altri protocolli; [ ] prova su un gateway o hardware veri.
+- [ ] **Bloccante, prossimo**: adattatori MQTT, Modbus, seriale e altri protocolli per dispositivi reali. La progettazione (protocolli, contratto, ciclo di vita delle connessioni persistenti) la fa il proprietario prima che si scriva il codice; punto di partenza: sottoclasse di `Reflex` con `simulato = False`, vedi [`DISPOSITIVI_REALI.md`](DISPOSITIVI_REALI.md).
+- [x] Budget, timeout e circuit breaker per modello ([`OSSERVABILITA.md`](OSSERVABILITA.md)).
+- [x] Correlation id, log JSON, metriche Prometheus e propagazione `traceparent`; [ ] esportatore OpenTelemetry e span dei nodi.
+- [x] Persistenza e riconciliazione dello stato fisico; [ ] adapter hardware specifici (Shelly, MQTT).
 - [ ] Scheduler robusto per health check e TTL.
 - [x] Funzionamento multi-worker (stato condiviso nel database, SQLite o Postgres; un backend di dispositivi reali sostituirebbe gli effettori simulati).
 - [ ] Dashboard operatore completa nel core (la pagina `/demo` è solo dimostrativa; un nodo può aggiungere le sue pagine come estensione).

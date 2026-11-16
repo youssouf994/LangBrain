@@ -21,6 +21,7 @@ Formato (le chiavi opzionali compaiono solo quando servono):
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -103,33 +104,56 @@ def _errore(device_name: str, response: str, error_type: str, details: dict[str,
     }
 
 
+def _misura(operazione: str, device_name: str, inizio: float, esito: str) -> None:
+    """Conta l'operazione sul dispositivo e ne registra la durata (metriche `langbrain_device_*`)."""
+    from app.core import metriche
+    metriche.incrementa("langbrain_device_operations_total", device=device_name, operation=operazione, outcome=esito)
+    metriche.osserva("langbrain_device_operation_duration_seconds", time.perf_counter() - inizio, operation=operazione)
+
+
 async def leggi_tool(tool_obj: Any, device_name: str, timeout: float = TIMEOUT_TOOL_SECONDI) -> dict[str, Any]:
     """Legge il valore di un tool senza mai sollevare: restituisce {device_name, success, response, value, ...}."""
+    inizio = time.perf_counter()
     try:
         valore = await asyncio.wait_for(tool_obj.get_tool_value(), timeout=timeout)
     except ErroreTool as e:
+        _misura("read", device_name, inizio, e.codice)
         return _errore(device_name, e.messaggio, e.codice, e.dettagli)
     except asyncio.TimeoutError:
+        _misura("read", device_name, inizio, "TIMEOUT")
         return _errore(device_name, f"Nessuna risposta dal dispositivo entro {timeout}s.", "TIMEOUT")
     except Exception as e:
+        _misura("read", device_name, inizio, type(e).__name__)
         return _errore(device_name, str(e) or type(e).__name__, type(e).__name__)
+    _misura("read", device_name, inizio, "ok")
     return {"device_name": device_name, "success": True, "response": f"Valore letto: {valore}", "value": valore}
 
 
 async def comanda_tool(
     tool_obj: Any, device_name: str, valore: Any, timeout: float = TIMEOUT_TOOL_SECONDI
 ) -> dict[str, Any]:
-    """Invia un comando a un tool senza mai sollevare: restituisce {device_name, success, response, ...}."""
+    """
+    Invia un comando a un tool senza mai sollevare: restituisce {device_name, success, response, ...}.
+    Un comando riuscito viene registrato come ultimo stato noto del dispositivo (`app/core/stato_fisico.py`).
+    """
+    inizio = time.perf_counter()
     try:
         esito = await asyncio.wait_for(tool_obj.set_tool_value(valore), timeout=timeout)
     except ErroreTool as e:
+        _misura("command", device_name, inizio, e.codice)
         return _errore(device_name, e.messaggio, e.codice, e.dettagli)
     except asyncio.TimeoutError:
+        _misura("command", device_name, inizio, "TIMEOUT")
         return _errore(device_name, f"Nessuna risposta dal dispositivo entro {timeout}s.", "TIMEOUT")
     except Exception as e:
+        _misura("command", device_name, inizio, type(e).__name__)
         return _errore(device_name, str(e) or type(e).__name__, type(e).__name__)
     if esito is False:
+        _misura("command", device_name, inizio, "COMMAND_REJECTED")
         return _errore(device_name, "Il dispositivo ha rifiutato il comando.", "COMMAND_REJECTED")
+    _misura("command", device_name, inizio, "ok")
+    from app.core import stato_fisico  # import tardivo: stato_fisico usa la configurazione, che usa questo modulo
+    await stato_fisico.salva(device_name, valore, getattr(tool_obj, "unit", "") or "", stato_fisico.COMANDATO)
     return {
         "device_name": device_name, "success": True,
         "response": f"Comando '{valore}' eseguito su '{device_name}'.", "value": valore,

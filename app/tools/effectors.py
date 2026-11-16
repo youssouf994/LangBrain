@@ -1,6 +1,7 @@
 import logging
 from typing import Any
 from app.core import multiprocesso
+from app.core.configurazione import get_configurazione
 from app.core.risultati import ErroreTool
 from app.tools.reflex import Reflex
 
@@ -14,7 +15,10 @@ class SimulatedEffector(Reflex):
     """
     Effettore simulato per sensori e attuatori IoT (reali o simulati).
     Condiviso sia dai sotto-agenti che dal Cervello per azionare direttamente i dispositivi.
+    Per un dispositivo vero si indica un `adattatore` in `configurazione.toml` (vedi `app/tools/adattatori.py`).
     """
+    simulato = True
+
     def __init__(self, target_device: str, initial_value: Any = "OFF", unit: str = ""):
         super().__init__(target_device=target_device)
         self._current_value = initial_value
@@ -63,6 +67,10 @@ class SimulatedEffector(Reflex):
         from app.db.schema import adesso_utc
         self.ultimo_contatto = adesso_utc()
 
+    def ripristina_valore(self, valore: Any) -> None:
+        """Rimette in memoria l'ultimo valore comandato prima del riavvio (vedi `app/core/riconciliazione.py`)."""
+        self._current_value = valore
+
     async def set_tool_value(self, value: Any) -> bool:
         self._verifica_guasto("comando")
         self._segna_contatto()
@@ -87,12 +95,18 @@ def get_tool(target_device: str, initial_value: Any = "OFF", unit: str = "") -> 
     Se non esiste ancora, la crea e la registra nel registry globale.
     """
     if target_device not in _TOOL_REGISTRY:
-        _TOOL_REGISTRY[target_device] = SimulatedEffector(
-            target_device=target_device,
-            initial_value=initial_value,
-            unit=unit,
-        )
+        _TOOL_REGISTRY[target_device] = _crea_effettore(target_device, initial_value, unit)
     return _TOOL_REGISTRY[target_device]
+
+
+def _crea_effettore(target_device: str, initial_value: Any, unit: str):
+    """L'adattatore del dispositivo se `configurazione.toml` ne indica uno, altrimenti l'effettore simulato in memoria."""
+    regola = get_configurazione().regola_per(target_device)
+    if regola is not None and regola.adattatore:
+        from app.tools.adattatori import crea_adattatore
+        logger.info("[Tool: %s] Adattatore '%s' da configurazione.toml.", target_device, regola.adattatore)
+        return crea_adattatore(regola.adattatore, target_device, regola.opzioni_adattatore, unit or regola.unita)
+    return SimulatedEffector(target_device=target_device, initial_value=initial_value, unit=unit)
 
 
 def registra_tool(target_device: str, tool: Any) -> None:

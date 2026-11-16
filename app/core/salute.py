@@ -59,6 +59,25 @@ def stato_provider() -> dict[str, str]:
         return {"status": "unknown", "provider": "unknown"}
 
 
+async def aggiorna_metriche_base() -> None:
+    """Collettore delle metriche: durata di vita, versione e raggiungibilità del database."""
+    from app.core import metriche
+    metriche.imposta("langbrain_uptime_seconds", uptime_s())
+    metriche.imposta("langbrain_build_info", 1, version=VERSIONE_NUCLEO)
+    metriche.imposta("langbrain_database_up", 1 if (await stato_database())["status"] == "ok" else 0)
+
+
+async def aggiorna_metriche_dispositivi() -> None:
+    """Collettore delle metriche: dispositivi che rispondono e stato dei loro interruttori (nessuna lettura sul dispositivo)."""
+    from app.core import metriche
+    from app.tools.effectors import tool_registrati
+    for nome, tool in tool_registrati().items():
+        metriche.imposta("langbrain_device_online", 1 if getattr(tool, "online", True) else 0, device=nome)
+        aggiorna = getattr(tool, "aggiorna_metriche", None)
+        if aggiorna is not None:
+            await aggiorna()
+
+
 async def salute_nucleo(db_path: str | None = None) -> dict:
     """I campi di `Health` che il nucleo conosce; l'adattatore aggiunge `status`, `apartment_id`, `connector` e `devices`."""
     return {

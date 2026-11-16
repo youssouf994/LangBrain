@@ -23,6 +23,7 @@ if sys.platform == "win32":  # psycopg asincrono (checkpointer) non funziona con
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 TABELLE = ("events", "signals", "readings", "node_runs", "runtime_state", "leases", "agents_registry", "agent_models", "hitl_scadenze",
+           "device_state", "alembic_version",
            "checkpoint_writes", "checkpoint_blobs", "checkpoints", "checkpoint_migrations")
 
 

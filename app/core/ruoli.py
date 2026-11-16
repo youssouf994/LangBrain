@@ -64,6 +64,7 @@ PERMESSI: dict[tuple[str, str], Ruolo] = {
     ("GET", "/graph/runs"): Ruolo.TIROCINANTE,
     ("GET", "/signals"): Ruolo.TIROCINANTE,
     ("GET", "/signals/stats"): Ruolo.TIROCINANTE,
+    ("GET", "/metrics"): Ruolo.TIROCINANTE,   # Prometheus: header X-API-Key (vedi docs/OSSERVABILITA.md)
     ("GET", "/config/api/fields"): Ruolo.TIROCINANTE,  # values only: secrets are never returned
     # Procedure ordinarie (/graph/resume con OVERRIDE richiede comunque il primario)
     ("POST", "/graph/run"): Ruolo.MEDICO_DI_GUARDIA,
@@ -73,6 +74,7 @@ PERMESSI: dict[tuple[str, str], Ruolo] = {
     ("POST", "/graph/health-check"): Ruolo.MEDICO_DI_GUARDIA,
     ("POST", "/tools"): Ruolo.MEDICO_DI_GUARDIA,
     ("POST", "/effectors"): Ruolo.MEDICO_DI_GUARDIA,
+    ("POST", "/effectors/reconcile"): Ruolo.MEDICO_DI_GUARDIA,   # legge i dispositivi, non li comanda
     ("POST", "/events/unblock"): Ruolo.MEDICO_DI_GUARDIA,
     ("DELETE", "/events/reset-conflicts/{target}"): Ruolo.MEDICO_DI_GUARDIA,
     # Decisioni critiche e configurazione
