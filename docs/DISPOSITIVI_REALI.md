@@ -77,6 +77,7 @@ Esiti della riconciliazione di un dispositivo vero:
 Il prefisso `RECONCILED_` fa sì che gli eventi siano per le regole di priorità eventi *chiusi*, mai blocchi: una deriva non impedisce a un agente di agire.
 Una differenza tra due valori **osservati** (un sensore che cambia da solo) non è una deriva: lo è solo la differenza dall'ultimo *comando*.
 
+`GET /effectors/{id}/state` e `GET /system/device-state` (ruolo `tirocinante`) restituiscono l'ultimo stato noto salvato, senza interrogare i dispositivi (404 se mai comandato né riconciliato).
 `POST /effectors/reconcile` (ruolo `medico_di_guardia`) esegue la riconciliazione subito e restituisce il rapporto per dispositivo. Nelle metriche:
 `langbrain_device_reconciliations_total{outcome}`.
 

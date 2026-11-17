@@ -28,6 +28,7 @@ NON_SU_POSTGRES: dict[str, str] = {
     "DatabaseTest::test_init_db_e_idempotente_e_non_semina_dati_di_prova_per_default": _SQLITE_DIRETTO,
     "DatabaseTest::test_un_database_con_lo_schema_vecchio_viene_migrato": _SQLITE_DIRETTO + " (la migrazione su Postgres è in test_postgres.py)",
     "CheckpointerPersistenteTest::test_tabelle_create_nello_stesso_file_del_db_applicativo": _SQLITE_DIRETTO,
+    "MigrazioniTest::test_un_database_di_prima_di_alembic_viene_preso_in_carico_senza_perdere_dati": _SQLITE_DIRETTO + " (su Postgres la baseline è provata dagli altri test di MigrazioniTest)",
     "EventLogDatabaseTest::test_expiry_skips_only_actions_already_expired_or_resolved": _SQLITE_DIRETTO,
     "SignalTableTest::test_window_excludes_old_rows": _SQLITE_DIRETTO,
     "RisoluzioneModelloTest::test_un_ciclo_nei_dati_non_causa_un_ciclo_infinito": _SQLITE_DIRETTO,

@@ -97,7 +97,9 @@ Le dipendenze sono fissate (2026-09-20):
 - [x] Migrazioni versionate (Alembic: [`MIGRAZIONI.md`](MIGRAZIONI.md)).
 - [x] Adattatore HTTP per dispositivi reali; [ ] MQTT e altri protocolli; [ ] prova su un gateway o hardware veri.
 - [ ] **Bloccante, prossimo**: adattatori MQTT, Modbus, seriale e altri protocolli per dispositivi reali. La progettazione (protocolli, contratto, ciclo di vita delle connessioni persistenti) la fa il proprietario prima che si scriva il codice; punto di partenza: sottoclasse di `Reflex` con `simulato = False`, vedi [`DISPOSITIVI_REALI.md`](DISPOSITIVI_REALI.md).
+- [ ] **Bloccante, dopo**: eliminazione totale di SQLite; obiettivo, lasciare solo Postgres. Da fare: togliere il ramo SQLite da `app/core/archivio.py` e da `app/db/`, il checkpointer SQLite, `aiosqlite` e `langgraph-checkpoint-sqlite` dalle dipendenze; portare la suite di test (oggi `NON_SU_POSTGRES` in `tests/pg_isolamento.py`) e l'avvio locale (`docker-compose`) su Postgres; riscrivere i test solo-SQLite; aggiornare la baseline Alembic e i documenti.
 - [x] Budget, timeout e circuit breaker per modello ([`OSSERVABILITA.md`](OSSERVABILITA.md)).
+- [x] API per osservare e governare quanto sopra: stato fisico salvato (`GET /effectors/{id}/state`, `GET /system/device-state`), interruttori e budget dei modelli (`GET /llm/protection`, `POST /llm/protection/reset`), stato delle migrazioni (`GET /system/migrations`), con modelli di risposta Pydantic.
 - [x] Correlation id, log JSON, metriche Prometheus e propagazione `traceparent`; [ ] esportatore OpenTelemetry e span dei nodi.
 - [x] Persistenza e riconciliazione dello stato fisico; [ ] adapter hardware specifici (Shelly, MQTT).
 - [ ] Scheduler robusto per health check e TTL.

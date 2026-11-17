@@ -254,6 +254,62 @@ class ToolWriteRequest(BaseModel):
     value: Any
 
 
+class DeviceStateResponse(BaseModel):
+    """Ultimo stato noto di un dispositivo, salvato nel database (sopravvive ai riavvii)."""
+    device_id: str
+    value: Any
+    unit: str = ""
+    source: str
+    """`commanded` = ultimo comando riuscito; `observed` = ultima lettura registrata dalla riconciliazione."""
+    updated_at: str
+
+
+class DeviceStatesResponse(BaseModel):
+    persistence: bool
+    """False se `[stato_fisico] persistenza = 0`: nulla viene salvato."""
+    devices: list[DeviceStateResponse]
+
+
+class LlmCircuitResponse(BaseModel):
+    provider: str
+    model: str
+    state: str
+    """`chiuso` (le chiamate passano), `aperto` (respinte), `in_prova` (passa una chiamata di prova)."""
+    consecutive_errors: int
+    retry_in_s: float
+
+
+class LlmBudgetResponse(BaseModel):
+    provider: str
+    requests_last_hour: int
+    requests_per_hour_limit: int
+    """0 = nessun limite."""
+    tokens_today: int
+    tokens_per_day_limit: int
+    """0 = nessun limite."""
+
+
+class LlmProtectionResponse(BaseModel):
+    """Interruttori e budget dei modelli, per il processo che risponde (con più processi ognuno ha i suoi)."""
+    circuits: list[LlmCircuitResponse]
+    budgets: list[LlmBudgetResponse]
+
+
+class LlmCircuitResetResponse(BaseModel):
+    reset: int
+    """Quanti interruttori sono stati chiusi."""
+
+
+class MigrationStatusResponse(BaseModel):
+    mode: str
+    """`auto` (l'app migra da sola) o `manuale` (si migra con `alembic upgrade head`)."""
+    current: str | None
+    """Revisione del database; null se Alembic non l'ha ancora preso in carico."""
+    expected: str
+    """Ultima revisione presente nel codice."""
+    up_to_date: bool
+
+
 class ToolFaultRequest(BaseModel):
     """Simula un guasto del dispositivo (solo tool mock): le operazioni successive falliscono con il messaggio indicato."""
     fault: str | None = None
@@ -858,6 +914,22 @@ async def set_tool_endpoint(body: ToolWriteRequest):
     return {"device_id": body.target, "new_value": lettura.get("value", validazione.valore)}
 
 
+@app.get("/effectors/{device_id}/state", tags=["Effectors"], response_model=DeviceStateResponse)
+async def get_effector_state(device_id: str):
+    """L'ultimo stato noto salvato nel database (non interroga il dispositivo: per quello c'è `GET /effectors/{device_id}`). 404 se mai comandato né riconciliato."""
+    stato = await stato_fisico.leggi(device_id)
+    if stato is None:
+        raise HTTPException(status_code=404, detail=scegli(f"Nessuno stato noto per '{device_id}'.", f"No known state for '{device_id}'."))
+    return stato
+
+
+@app.get("/system/device-state", tags=["System"], response_model=DeviceStatesResponse)
+async def list_device_states():
+    """Gli ultimi stati noti di tutti i dispositivi, come li vede la riconciliazione dopo un riavvio."""
+    stati = await stato_fisico.leggi_tutti()
+    return {"persistence": stato_fisico.attiva(), "devices": sorted(stati.values(), key=lambda s: s["device_id"])}
+
+
 @app.post("/effectors/reconcile", tags=["Effectors"])
 async def reconcile_effectors():
     """
@@ -1067,6 +1139,32 @@ async def macro_health_check():
     result = await brain.check_body_status(state, readings, recent_events)
     messages = result.get("messages", [])
     return {"result": messages[-1].content if messages else None}
+
+
+# --- Protezione dei modelli e migrazioni ---
+
+@app.get("/llm/protection", tags=["LLM"], response_model=LlmProtectionResponse)
+async def get_llm_protection():
+    """Stato degli interruttori di circuito e del budget dei modelli (vedi `[llm.protezione]` e `[llm.budget]`)."""
+    return {"circuits": protezione_llm.protezione.stato(), "budgets": protezione_llm.protezione.budget()}
+
+
+@app.post("/llm/protection/reset", tags=["LLM"], response_model=LlmCircuitResetResponse)
+async def reset_llm_circuits(provider: str | None = None, model: str | None = None):
+    """Chiude subito gli interruttori aperti (il provider è tornato) senza aspettare la pausa. Senza parametri li chiude tutti; non azzera il budget."""
+    return {"reset": protezione_llm.protezione.riapri(provider, model)}
+
+
+@app.get("/system/migrations", tags=["System"], response_model=MigrationStatusResponse)
+async def get_migration_status():
+    """Revisione dello schema del database contro quella richiesta dal codice (vedi `docs/MIGRAZIONI.md`)."""
+    from app.core import archivio
+    from app.db import migrazioni
+    from app.db.database import DB_PATH
+    async with archivio.motore(DB_PATH).connect() as db:
+        corrente = await db.run_sync(migrazioni.revisione_corrente)
+    attesa = migrazioni.revisione_attesa()
+    return {"mode": migrazioni.modo(), "current": corrente, "expected": attesa, "up_to_date": corrente == attesa}
 
 
 # --- Metriche ---

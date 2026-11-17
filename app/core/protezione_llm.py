@@ -169,6 +169,30 @@ class ProtezioneLlm:
                           "retry_in_s": round(interruttore.attesa_residua, 1)})
         return righe
 
+    def budget(self) -> list[dict]:
+        """Uso del budget per provider (richieste dell'ultima ora, token stimati di oggi) con i limiti in vigore (0 = nessun limite)."""
+        righe = []
+        for provider in sorted({p for p, _ in self._interruttori} | set(self._richieste) | set(self._token)):
+            limiti = self.limiti(provider)
+            righe.append({"provider": provider,
+                          "requests_last_hour": self._richieste_ultima_ora(provider), "requests_per_hour_limit": limiti.get("richieste_ora", 0),
+                          "tokens_today": self._token_oggi(provider), "tokens_per_day_limit": limiti.get("token_giorno", 0)})
+        return righe
+
+    def riapri(self, provider: str | None = None, modello: str | None = None) -> int:
+        """
+        Chiude subito gli interruttori aperti (intervento dell'operatore: il provider è tornato). Senza argomenti li chiude tutti;
+        con `provider` (e `modello`) solo quelli. Restituisce quanti ne ha cambiati.
+        """
+        cambiati = 0
+        for (p, m), interruttore in self._interruttori.items():
+            if (provider and p != provider) or (modello and m != modello):
+                continue
+            if interruttore.stato != CHIUSO or interruttore.errori_consecutivi:
+                interruttore.successo()
+                cambiati += 1
+        return cambiati
+
     async def aggiorna_metriche(self) -> None:
         """Collettore delle metriche: stato degli interruttori e quota di budget usata."""
         for riga in self.stato():

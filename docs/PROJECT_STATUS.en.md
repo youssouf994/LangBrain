@@ -113,7 +113,9 @@ by the container from the native one; for a model on another LAN machine the two
 - [x] Versioned migrations (Alembic: [`MIGRAZIONI.md`](MIGRAZIONI.md), Italian).
 - [x] HTTP adapter for real devices; [ ] MQTT and other protocols; [ ] trial on a real gateway or hardware.
 - [ ] **Blocking, next**: MQTT, Modbus, serial and other protocol adapters for real devices. The owner designs them (protocols, contract, lifecycle of persistent connections) before any code is written; starting point: a `Reflex` subclass with `simulato = False`, see [`DISPOSITIVI_REALI.md`](DISPOSITIVI_REALI.md) (Italian).
+- [ ] **Blocking, after that**: remove SQLite entirely; goal, leave only Postgres. To do: drop the SQLite branch from `app/core/archivio.py` and `app/db/`, the SQLite checkpointer, and `aiosqlite` / `langgraph-checkpoint-sqlite` from the dependencies; move the test suite (today `NON_SU_POSTGRES` in `tests/pg_isolamento.py`) and local start-up (`docker-compose`) to Postgres; rewrite the SQLite-only tests; update the Alembic baseline and the docs.
 - [x] Budget, timeout and circuit breaker per model.
+- [x] APIs to observe and operate the above: stored physical state (`GET /effectors/{id}/state`, `GET /system/device-state`), model circuits and budget (`GET /llm/protection`, `POST /llm/protection/reset`), migration status (`GET /system/migrations`), with Pydantic response models.
 - [x] Correlation ids, JSON logs, Prometheus metrics and `traceparent` propagation; [ ] OpenTelemetry exporter and node spans.
 - [x] Persistence and reconciliation of the physical state; [ ] specific hardware adapters (Shelly, MQTT).
 - [ ] Robust scheduler for health checks and TTL.

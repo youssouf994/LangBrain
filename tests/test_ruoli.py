@@ -2,6 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
@@ -64,7 +65,7 @@ def blocca_i_gestori(test):
     Così un 403 dimostra che il gestore NON è stato eseguito, e un'autorizzazione rotta non può cancellare dati veri.
     """
     async def stub(*args, **kwargs):
-        return {"gestore": "eseguito"}
+        return JSONResponse({"gestore": "eseguito"})   # una Response non passa dal response_model delle rotte
 
     for rotta in app.routes:
         if isinstance(rotta, APIRoute) and rotta.path != "/graph/resume":

@@ -19,6 +19,9 @@ Four known blockers addressed. Not yet proven on real hardware: the HTTP adapter
 - **Migrations.** Alembic (`migrations/`, `alembic.ini`, `docs/MIGRAZIONI.md`) replaces the automatic column adding. Baseline `0001` also adopts databases
   created before Alembic; `0002` adds `device_state`. `LANGBRAIN_MIGRAZIONI=manual` migrates as a deploy step instead of at start-up. `azzera_database`
   now also drops `alembic_version`.
+- **API for the above.** `GET /effectors/{device_id}/state` and `GET /system/device-state` (stored physical state), `GET /llm/protection`
+  (circuits and budget) and `POST /llm/protection/reset` (close open circuits, operator role), `GET /system/migrations` (database revision against
+  the code's), all with Pydantic response models.
 
 The framework is renamed after the human body so that the same core fits any domain, and a use case no longer touches the
 core: it plugs into the API as an extension. The old names keep working as aliases.
