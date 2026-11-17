@@ -80,6 +80,9 @@ il grafo si ferma e l'operatore decide (cambia modello, alza il budget, aspetta)
 aperto passa al modello o al provider successivo della catena. Lo stato degli interruttori e dei conteggi è in memoria del processo e riparte da zero a ogni
 riavvio.
 
+Via API: `GET /llm/protection` (ruolo `tirocinante`) riporta interruttori e uso del budget del processo che risponde; `POST /llm/protection/reset`
+(ruolo `medico_di_guardia`, parametri facoltativi `provider` e `model`) chiude subito gli interruttori aperti quando il provider è tornato. Non azzera il budget.
+
 ## Limiti
 
 - Nessun esportatore di tracce (OpenTelemetry/Jaeger) e nessuno *span* interno ai nodi del grafo: la durata dei nodi è nelle metriche e in `GET /graph/stats`.

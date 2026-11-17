@@ -33,7 +33,7 @@ jobs:
       - run: python -m pip check
       - name: Suite di test (database SQLite temporanei, nessun LLM reale)
         run: python -m pytest tests -q
-      - name: Migrazioni (alembic upgrade head, poi alembic check: lo schema nel codice e le revisioni coincidono)
+      - name: "Migrazioni: alembic upgrade head, poi alembic check (lo schema nel codice e le revisioni coincidono)"
         env:
           DB_PATH: ${{ runner.temp }}/migrazioni-ci.db
         run: |

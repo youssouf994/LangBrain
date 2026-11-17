@@ -1,7 +1,7 @@
 # Dipendenze dirette di LangBrain, con versione esatta (verificate con la suite di test).
 # L'elenco completo, transitive incluse, è in requirements.lock. Python 3.12 o superiore.
 # Per aggiornare: modificare le versioni qui, ricreare un ambiente pulito, rigenerare requirements.lock e rilanciare i test.
-langgraph==1.2.11
+langgraph==1.2.14
 langgraph-checkpoint-sqlite==3.1.2
 langchain-core==1.6.1
 fastapi==0.141.1

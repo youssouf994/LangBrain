@@ -58,6 +58,10 @@ PERMESSI: dict[tuple[str, str], Ruolo] = {
     ("GET", "/effectors"): Ruolo.TIROCINANTE,
     ("GET", "/tools/{device_id}"): Ruolo.TIROCINANTE,
     ("GET", "/effectors/{device_id}"): Ruolo.TIROCINANTE,
+    ("GET", "/effectors/{device_id}/state"): Ruolo.TIROCINANTE,
+    ("GET", "/system/device-state"): Ruolo.TIROCINANTE,
+    ("GET", "/llm/protection"): Ruolo.TIROCINANTE,
+    ("GET", "/system/migrations"): Ruolo.TIROCINANTE,
     ("GET", "/events"): Ruolo.TIROCINANTE,
     ("GET", "/events/stats"): Ruolo.TIROCINANTE,
     ("GET", "/graph/stats"): Ruolo.TIROCINANTE,
@@ -75,6 +79,7 @@ PERMESSI: dict[tuple[str, str], Ruolo] = {
     ("POST", "/tools"): Ruolo.MEDICO_DI_GUARDIA,
     ("POST", "/effectors"): Ruolo.MEDICO_DI_GUARDIA,
     ("POST", "/effectors/reconcile"): Ruolo.MEDICO_DI_GUARDIA,   # legge i dispositivi, non li comanda
+    ("POST", "/llm/protection/reset"): Ruolo.MEDICO_DI_GUARDIA,   # chiude gli interruttori, non cambia il budget
     ("POST", "/events/unblock"): Ruolo.MEDICO_DI_GUARDIA,
     ("DELETE", "/events/reset-conflicts/{target}"): Ruolo.MEDICO_DI_GUARDIA,
     # Decisioni critiche e configurazione

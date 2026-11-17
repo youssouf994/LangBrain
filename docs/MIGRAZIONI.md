@@ -19,6 +19,7 @@ Postgres c'è in più un blocco consultivo).
 
 Con `LANGBRAIN_MIGRAZIONI=manuale` l'applicazione **non** migra: verifica che il database sia già all'ultima revisione e, se è indietro, si
 ferma con un messaggio chiaro. Così lo schema cambia in un momento scelto (con un backup fatto) e non al primo avvio di una nuova versione.
+`GET /system/migrations` (ruolo `tirocinante`) mostra modo, revisione del database, revisione attesa dal codice e se sono allineate.
 
 ```bash
 # stesso ambiente dell'app: DB_PATH oppure LANGBRAIN_DB_BACKEND=postgres + LANGBRAIN_DB_URL
