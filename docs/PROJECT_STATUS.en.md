@@ -2,7 +2,7 @@
 
 🇬🇧 English | 🇮🇹 [Italiano](PROJECT_STATUS.md)
 
-Updated on 2026-11-16. The previous version of this document was a static audit listing the defects found; those
+Updated on 2026-11-18. The previous version of this document was a static audit listing the defects found; those
 defects have been fixed (the Git history keeps the original audit) and what remains here is the current state, the
 known limits and the roadmap.
 
@@ -112,8 +112,20 @@ by the container from the native one; for a model on another LAN machine the two
 - [x] Postgres backend (`LANGBRAIN_DB_BACKEND=postgres` + `LANGBRAIN_DB_URL`, SQLAlchemy Core, switch and rollback in [`ROLLBACK.md`](ROLLBACK.md), whole suite also run on Postgres in CI).
 - [x] Versioned migrations (Alembic: [`MIGRAZIONI.md`](MIGRAZIONI.md), Italian).
 - [x] HTTP adapter for real devices; [ ] MQTT and other protocols; [ ] trial on a real gateway or hardware.
-- [ ] **Blocking, next**: MQTT, Modbus, serial and other protocol adapters for real devices. The owner designs them (protocols, contract, lifecycle of persistent connections) before any code is written; starting point: a `Reflex` subclass with `simulato = False`, see [`DISPOSITIVI_REALI.md`](DISPOSITIVI_REALI.md) (Italian). The adapters belong in the LangBrain **core**, not only in the iot/energy node (see `CONTRIBUTING.md`).
-- [ ] **Blocking, after that**: remove SQLite entirely; goal, leave only Postgres. To do: drop the SQLite branch from `app/core/archivio.py` and `app/db/`, the SQLite checkpointer, and `aiosqlite` / `langgraph-checkpoint-sqlite` from the dependencies; move the test suite (today `NON_SU_POSTGRES` in `tests/pg_isolamento.py`) and local start-up (`docker-compose`) to Postgres; rewrite the SQLite-only tests; update the Alembic baseline and the docs.
+- [ ] **Blocking, next**: remove SQLite entirely; goal, leave only Postgres. This happens now, in parallel with the adapter design, so that the adapters' database-dependent features (connections held by a single process, shared state, continuous reconciliation) are written and tested for one backend only. To do: drop the SQLite branch from `app/core/archivio.py` and `app/db/`, the SQLite checkpointer, and `aiosqlite` / `langgraph-checkpoint-sqlite` from the dependencies; move the test suite (today `NON_SU_POSTGRES` in `tests/pg_isolamento.py`) and local start-up (`docker-compose`) to Postgres; rewrite the SQLite-only tests; update the Alembic baseline and the docs.
+- [ ] **Blocking, after that**: adapters for real devices, Postgres only. The design is in progress: the owner is writing it in a document kept outside the repository until it is closed, and no code is written before then. Decisions so far:
+  - Python only, using mature libraries, no C/C++;
+  - one contract, written before the protocols, with three models: request/response, persistent connection, publish/subscribe;
+  - every adapter gives the same guarantees as the HTTP adapter;
+  - one connection per device;
+  - continuous reconciliation with a configurable interval.
+
+  Candidate protocols: MQTT, WebSocket, AMQP, SNMP, Modbus TCP and RTU, KNX, Home Assistant (WebSocket + REST). Starting point: a `Reflex` subclass with `simulato = False`, `crea_adattatore()` and `ADATTATORI_NOTI`, see [`DISPOSITIVI_REALI.md`](DISPOSITIVI_REALI.md) (Italian). The adapters belong in the LangBrain **core**, not only in the iot/energy node (see `CONTRIBUTING.md`).
+- [ ] **TLS, together with the adapters**:
+  - **outbound, always LangBrain's job**: CA and client certificates for mutual TLS towards brokers and devices;
+  - **inbound, optional**: LangBrain's own HTTPS certificate for setups without a reverse proxy; in production the infrastructure remains the recommended way.
+
+  Certificates and secrets are read from sources given as a URI (`file://`, `env://`), with no provider-specific secret manager integrations. Never private keys in the database.
 - [x] Budget, timeout and circuit breaker per model.
 - [x] APIs to observe and operate the above: stored physical state (`GET /effectors/{id}/state`, `GET /system/device-state`), model circuits and budget (`GET /llm/protection`, `POST /llm/protection/reset`), migration status (`GET /system/migrations`), with Pydantic response models.
 - [x] Correlation ids, JSON logs, Prometheus metrics and `traceparent` propagation; [ ] OpenTelemetry exporter and node spans.

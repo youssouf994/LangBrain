@@ -2,7 +2,7 @@
 
 🇮🇹 Italiano | 🇬🇧 [English](PROJECT_STATUS.en.md)
 
-Aggiornato il 2026-11-16. La versione precedente di questo documento era un audit statico con l'elenco dei difetti trovati; quei difetti sono stati corretti (la cronologia Git conserva l'audit originale) e qui resta lo stato attuale, i limiti noti e la roadmap.
+Aggiornato il 2026-11-18. La versione precedente di questo documento era un audit statico con l'elenco dei difetti trovati; quei difetti sono stati corretti (la cronologia Git conserva l'audit originale) e qui resta lo stato attuale, i limiti noti e la roadmap.
 
 ## Sintesi
 
@@ -96,8 +96,20 @@ Le dipendenze sono fissate (2026-09-20):
 - [x] Backend Postgres (`LANGBRAIN_DB_BACKEND=postgres` + `LANGBRAIN_DB_URL`, SQLAlchemy Core, interruttore e rollback in [`ROLLBACK.md`](ROLLBACK.md), suite eseguita anche su Postgres in CI).
 - [x] Migrazioni versionate (Alembic: [`MIGRAZIONI.md`](MIGRAZIONI.md)).
 - [x] Adattatore HTTP per dispositivi reali; [ ] MQTT e altri protocolli; [ ] prova su un gateway o hardware veri.
-- [ ] **Bloccante, prossimo**: adattatori MQTT, Modbus, seriale e altri protocolli per dispositivi reali. La progettazione (protocolli, contratto, ciclo di vita delle connessioni persistenti) la fa il proprietario prima che si scriva il codice; punto di partenza: sottoclasse di `Reflex` con `simulato = False`, vedi [`DISPOSITIVI_REALI.md`](DISPOSITIVI_REALI.md). Gli adattatori si applicano al **nucleo** di LangBrain, non solo al nodo iot/energia (vedi `CONTRIBUTING.md`).
-- [ ] **Bloccante, dopo**: eliminazione totale di SQLite; obiettivo, lasciare solo Postgres. Da fare: togliere il ramo SQLite da `app/core/archivio.py` e da `app/db/`, il checkpointer SQLite, `aiosqlite` e `langgraph-checkpoint-sqlite` dalle dipendenze; portare la suite di test (oggi `NON_SU_POSTGRES` in `tests/pg_isolamento.py`) e l'avvio locale (`docker-compose`) su Postgres; riscrivere i test solo-SQLite; aggiornare la baseline Alembic e i documenti.
+- [ ] **Bloccante, prossimo**: eliminazione totale di SQLite; obiettivo, lasciare solo Postgres. Si fa adesso, in parallelo con la progettazione degli adattatori, così le loro funzioni che usano il database (connessioni tenute da un solo processo, stato condiviso, riconciliazione continua) si scrivono e si testano per un solo backend. Da fare: togliere il ramo SQLite da `app/core/archivio.py` e da `app/db/`, il checkpointer SQLite, `aiosqlite` e `langgraph-checkpoint-sqlite` dalle dipendenze; portare la suite di test (oggi `NON_SU_POSTGRES` in `tests/pg_isolamento.py`) e l'avvio locale (`docker-compose`) su Postgres; riscrivere i test solo-SQLite; aggiornare la baseline Alembic e i documenti.
+- [ ] **Bloccante, dopo**: adattatori per dispositivi reali, solo su Postgres. La progettazione è in corso: la fa il proprietario in un documento tenuto fuori dal repository fino alla chiusura, e non si scrive codice prima. Decisioni prese finora:
+  - solo Python, con librerie mature, niente C/C++;
+  - un contratto unico, scritto prima dei protocolli, con tre modelli: richiesta/risposta, connessione persistente, pubblica/iscriviti;
+  - le stesse garanzie dell'adattatore HTTP per ogni adattatore;
+  - una connessione per dispositivo;
+  - riconciliazione continua con intervallo configurabile.
+
+  Protocolli candidati: MQTT, WebSocket, AMQP, SNMP, Modbus TCP e RTU, KNX, Home Assistant (WebSocket + REST). Punto di partenza: sottoclasse di `Reflex` con `simulato = False`, `crea_adattatore()` e `ADATTATORI_NOTI`, vedi [`DISPOSITIVI_REALI.md`](DISPOSITIVI_REALI.md). Gli adattatori si applicano al **nucleo** di LangBrain, non solo al nodo iot/energia (vedi `CONTRIBUTING.md`).
+- [ ] **TLS, con gli adattatori**:
+  - **in uscita, sempre a carico di LangBrain**: CA e certificati client per il TLS mutuo verso broker e dispositivi;
+  - **in ingresso, opzionale**: certificato HTTPS di LangBrain per chi non ha un reverse proxy; in produzione resta consigliata l'infrastruttura.
+
+  Certificati e segreti si leggono da sorgenti indicate con un URI (`file://`, `env://`), senza integrazioni specifiche per i secret manager dei provider. Mai chiavi private nel database.
 - [x] Budget, timeout e circuit breaker per modello ([`OSSERVABILITA.md`](OSSERVABILITA.md)).
 - [x] API per osservare e governare quanto sopra: stato fisico salvato (`GET /effectors/{id}/state`, `GET /system/device-state`), interruttori e budget dei modelli (`GET /llm/protection`, `POST /llm/protection/reset`), stato delle migrazioni (`GET /system/migrations`), con modelli di risposta Pydantic.
 - [x] Correlation id, log JSON, metriche Prometheus e propagazione `traceparent`; [ ] esportatore OpenTelemetry e span dei nodi.
