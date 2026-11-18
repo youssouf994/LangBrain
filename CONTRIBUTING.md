@@ -48,3 +48,8 @@ Un caso d'uso (un nodo) non modifica il core: si aggancia con un modulo in `app/
 (`app/core/estensioni.py`, `docs/HOW_TO_CUSTOMIZE.md` sezione 10). Il core non deve mai nominare un nodo. Le modifiche al
 framework si fanno qui; i repository dei nodi le ricevono con un merge di `main`, quando vogliono (il nodo ha un sync giornaliero
 suo e `scripts/core_sync.py`): il core non avvisa nessuno.
+
+**Protocolli di comunicazione (HTTP, MQTT, Modbus, seriale...)**: gli adattatori per dispositivi reali sono modifiche **al nucleo**, non al solo
+nodo iot/energia: vanno scritti qui (`app/tools/adattatori.py`, `docs/DISPOSITIVI_REALI.md`) e i nodi li ricevono col merge di `main`. Un nodo
+non ne tiene una copia propria. Verifica nota: il core sync di un repository forkato da questo progetto non si è aggiornato dopo le ultime
+modifiche (adattatore HTTP, stato fisico, migrazioni); da controllare nel fork, non qui.
